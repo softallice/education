@@ -1,0 +1,1381 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 08 — RAG 검색증강생성</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01~07 덱과 동일한 디자인 시스템 계승 (Block 2 미니 과제)
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 코드 블록 조밀 변형 (긴 코드 대응) */
+.code pre.dense { font-size: clamp(0.6rem, 0.98vw, 0.86rem); line-height: 1.5; }
+.code pre.xdense { font-size: clamp(0.54rem, 0.88vw, 0.78rem); line-height: 1.45; }
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* 파이프라인 흐름 (개념 개요) */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; font-family: var(--font-mono); font-size: var(--small-size); }
+.flow .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.75em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.flow .st.now { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight: 800; border-color: var(--plum-deep); }
+.flow .st.fin { background: color-mix(in srgb, var(--sage) 30%, var(--paper)); color: var(--ink); font-weight: 700; }
+.flow .ar { color: var(--accent); font-weight: 800; }
+
+/* 벡터/유사도 스트립 */
+.reqstrip { display: flex; flex-wrap: wrap; gap: 5px; }
+.reqstrip span {
+  font-family: var(--font-mono); font-size: var(--micro-size); font-weight: 800;
+  padding: 0.2em 0.5em; border-radius: 6px;
+  background: color-mix(in srgb, var(--plum) 32%, var(--paper)); color: var(--plum-deep);
+  border: 1px solid color-mix(in srgb, var(--plum-deep) 38%, transparent);
+}
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+/* RAG 파이프라인 계단 (개념) */
+.pipe { display:flex; flex-direction:column; gap:6px; font-family: var(--font-mono); font-size: var(--small-size); }
+.pipe .row { display:flex; flex-wrap:wrap; align-items:center; gap:0.45em; }
+.pipe .lbl { font-weight:800; color: var(--accent); min-width: 6.5em; }
+.pipe .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 9px; padding: 0.3em 0.65em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.pipe .st.hot { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight:800; border-color: var(--plum-deep); }
+.pipe .ar { color: var(--accent); font-weight:800; }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .nav-dots { display: none; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 08</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">22</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-autumn-b" aria-label="타이틀">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · Block 2 · 미니 과제</span>
+      <div class="eyebrow">Week 08 — RAG 검색증강생성</div>
+      <h1 class="title">검색으로 근거를 찾는다 —<br/><span style="color:var(--accent)">RAG</span></h1>
+      <p class="hero-line">week06의 <b style="color:var(--ink)">/chat</b>(생성)과 week07의 <b style="color:var(--ink)">/embed</b>(임베딩)를 <b style="color:var(--ink)">하나의 파이프라인</b>으로 조립한다. 문서를 임베딩해 <b style="color:var(--ink)">벡터DB</b>에 넣고, 질문과 관련된 조각만 찾아 LLM에 넣어 <b style="color:var(--ink)">근거 있는 답</b>을 만드는 <b style="color:var(--ink)">docpilot /ask</b>를 완성한다.</p>
+      <div class="hero-evo">
+        <span class="chip">W06 <code class="inl" style="background:none;color:var(--teal)">/chat</code> · W07 <code class="inl" style="background:none;color:var(--teal)">/embed</code></span>
+        <span class="arrow">→</span>
+        <span class="chip">청킹 · 인덱싱 · <code class="inl" style="background:none;color:var(--teal)">search</code> · <code class="inl" style="background:none;color:var(--teal)">/ask</code></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-autumn-b" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.35" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:90ch">
+          <li><span class="mk">1</span><span>임베딩·유사도, <b>벡터DB</b>, 청킹·검색의 역할을 설명한다.</span></li>
+          <li><span class="mk">2</span><span>RAG 파이프라인 <b>4단계(인덱싱 → 검색 → 컨텍스트 주입 → 생성)</b>를 이해한다.</span></li>
+          <li><span class="mk">3</span><span>문서를 청킹해 임베딩하고 <b>Chroma에 저장하는 인덱싱 스크립트</b>를 만든다.</span></li>
+          <li><span class="mk">4</span><span>유사 청크를 검색해 LLM에 주입하는 <b><code class="inl">/ask</code></b>를 구현한다.</span></li>
+          <li><span class="mk">5</span><span>"왜 RAG인가"(<b>할루시네이션·최신성·비용·출처</b>)를 근거로 설명한다.</span></li>
+          <li><span class="mk">6</span><span>(대안) <b>pgvector</b>로도 같은 검색을 할 수 있음을 안다.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 개요 / 이번 주 지도 -->
+  <section class="slide t-autumn-b" aria-label="개념 개요">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 / 이번 주 지도 — Block 2 마무리</div>
+        <h2 class="head">감각과 기억을 붙였다. 이제 <span class="accent">둘을 잇는다</span></h2>
+        <div class="flow">
+          <span class="st fin">week06 /chat<br/>(LLM 생성)</span><span class="ar">+</span>
+          <span class="st fin">week07 /embed<br/>(임베딩)</span><span class="ar">→</span>
+          <span class="st now">week08 RAG /ask<br/>(검색 + 생성)</span>
+        </div>
+        <div class="grid grid-4" style="max-width:min(97vw,1180px)">
+          <div class="card"><b style="color:var(--accent)">① 왜 RAG인가</b><p class="lead" style="margin-top:0.25em">할루시네이션·최신성·비용·출처 문제 해결</p></div>
+          <div class="card"><b style="color:var(--accent)">② 4단계 파이프라인</b><p class="lead" style="margin-top:0.25em">인덱싱 → 검색 → 주입 → 생성</p></div>
+          <div class="card"><b style="color:var(--accent)">③ 청킹</b><p class="lead" style="margin-top:0.25em">문서를 겹침 있는 검색 단위로 자르기</p></div>
+          <div class="card"><b style="color:var(--accent)">④ 벡터DB</b><p class="lead" style="margin-top:0.25em">Chroma(기본) / pgvector(대안), 코사인</p></div>
+        </div>
+        <p class="note">4부 구성: <b>1부 준비(Chroma·청킹) → 2부 인덱싱(문서→벡터DB) → 3부 검색+생성(<code class="inl">/ask</code>) → 4부 대안(pgvector)</b>. 임베딩은 week07 <code class="inl">embed</code>를 그대로 재사용한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ① 왜 RAG인가 -->
+  <section class="slide t-autumn-b" aria-label="왜 RAG인가">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ① / 왜 RAG인가</div>
+        <h2 class="head">그냥 물으면 <span class="accent">지어낸다</span></h2>
+        <p class="lead" style="max-width:92ch">LLM은 <b>학습 시점 지식</b>만 알고 우리 회사·수업 문서는 모른다 → 그냥 물으면 <b>할루시네이션</b>. 문서를 통째로 프롬프트에 넣으면 <b>컨텍스트 한도 초과 + 비용 폭발</b>. 그래서 관련 조각만 찾아 넣는다.</p>
+        <div class="card" style="max-width:min(96vw,1120px);align-self:center;width:100%;background:linear-gradient(160deg,color-mix(in srgb,var(--plum) 14%,var(--paper)),var(--paper))">
+          <p class="lead" style="color:var(--ink);font-weight:600"><b style="color:var(--accent)">RAG</b>(Retrieval-Augmented Generation) = "질문과 관련된 문서 조각만 <b>찾아서(Retrieval)</b> 프롬프트에 <b>넣고(Augment)</b> 답을 <b>만든다(Generation)</b>."</p>
+        </div>
+        <div class="grid grid-4" style="max-width:min(96vw,1120px)">
+          <div class="card"><span class="pill">정확도 ↑</span><p class="lead" style="margin-top:0.35em">우리 문서 기반으로 답한다</p></div>
+          <div class="card"><span class="pill">최신성</span><p class="lead" style="margin-top:0.35em">최신 문서를 바로 반영</p></div>
+          <div class="card"><span class="pill">비용 ↓</span><p class="lead" style="margin-top:0.35em">필요한 조각만 넣는다</p></div>
+          <div class="card"><span class="pill">출처 표시</span><p class="lead" style="margin-top:0.35em">근거(source)를 함께 제시</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ② 파이프라인 4단계 -->
+  <section class="slide t-autumn-b" aria-label="파이프라인 4단계">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ② / 파이프라인 4단계</div>
+        <h2 class="head">사전에 <span class="accent">한 번</span>, 질문마다 <span class="accent">매번</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <span class="pill" style="background:color-mix(in srgb,var(--sage) 30%,var(--paper));color:var(--sage-deep);border-color:var(--sage-deep)">인덱싱 · 사전 1회</span>
+            <div class="pipe" style="margin-top:0.7em">
+              <div class="row"><span class="st">문서</span><span class="ar">→</span><span class="st hot">청킹</span><span class="ar">→</span><span class="st hot">임베딩</span></div>
+              <div class="row"><span class="ar">→</span><span class="st">벡터DB에 저장</span></div>
+            </div>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <span class="pill">질의 · 매 질문</span>
+            <div class="pipe" style="margin-top:0.7em">
+              <div class="row"><span class="st">질문</span><span class="ar">→</span><span class="st hot">임베딩</span><span class="ar">→</span><span class="st hot">검색(top-k)</span></div>
+              <div class="row"><span class="ar">→</span><span class="st">system+조각+질문</span><span class="ar">→</span><span class="st">생성</span><span class="ar">→</span><span class="st">답 + 출처</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="note">청킹·임베딩·검색은 이번 주의 새 부품, <b>생성은 week06 <code class="inl">llm.complete</code></b>, <b>임베딩은 week07 <code class="inl">embed</code></b>를 그대로 쓴다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ③④ 청킹 + 벡터DB -->
+  <section class="slide t-autumn-b" aria-label="청킹과 벡터DB">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ③④ / 청킹 · 벡터DB</div>
+        <h2 class="head">자르는 <span class="accent">단위</span>와 담는 <span class="accent">그릇</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <b style="color:var(--accent)">청킹(chunking)</b>
+            <p class="lead" style="margin-top:0.35em">문서를 <b>검색 단위</b>로 자르는 것. 너무 크면 관련 없는 내용까지 딸려오고, 너무 작으면 맥락이 끊긴다.</p>
+            <p class="lead" style="margin-top:0.5em">실무 기본값: <b>문자 300~800자, 겹침(overlap) 10~20%</b>. 겹침은 경계에서 문장이 잘려 뜻이 사라지는 걸 막는다.</p>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <b style="color:var(--accent)">벡터DB</b>
+            <p class="lead" style="margin-top:0.35em">임베딩 벡터를 저장하고 <b>"가장 가까운 k개"</b>를 빠르게 찾아주는 DB.</p>
+            <table class="tbl" style="margin-top:0.5em">
+              <thead><tr><th style="width:30%">옵션</th><th>특징</th></tr></thead>
+              <tbody>
+                <tr><td class="em">Chroma <span class="pill" style="padding:0.1em 0.5em">기본</span></td><td>파이썬 임베디드, 파일로 로컬 저장, 세팅 간단</td></tr>
+                <tr><td class="em">pgvector <span class="pill" style="padding:0.1em 0.5em">대안</span></td><td>PostgreSQL 확장, 기존 DB(week03) 재사용, SQL 조회</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="note">이번 주는 <b>Chroma</b>로 만들고, 4부에서 <b>pgvector</b>로 검색 백엔드를 교체 가능함을 체감한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 사전 준비 -->
+  <section class="slide t-autumn-b" aria-label="사전 준비">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">사전 준비 / 부품 확인</div>
+        <h2 class="head">week06·07 산출물 + <span class="accent">LLM 키</span></h2>
+        <div class="grid grid-3" style="max-width:min(96vw,1140px)">
+          <div class="card">
+            <span class="pill">week06 /chat</span>
+            <p class="lead" style="margin-top:0.4em"><code class="inl">app/llm.py</code>의 <code class="inl">complete</code>·<code class="inl">build_messages</code>가 동작. <b>생성 단계</b>에서 그대로 쓴다.</p>
+          </div>
+          <div class="card">
+            <span class="pill">week07 /embed</span>
+            <p class="lead" style="margin-top:0.4em"><code class="inl">app/embeddings.py</code>의 <code class="inl">embed</code>가 동작. <b>인덱싱·질의 임베딩</b>에 그대로 쓴다.</p>
+          </div>
+          <div class="card">
+            <span class="pill">LLM 프로바이더 · (대안) DB</span>
+            <p class="lead" style="margin-top:0.4em">OpenAI/Gemini 키 또는 Ollama(생성용). pgvector 대안 시 week03의 <b>PostgreSQL</b>.</p>
+          </div>
+        </div>
+        <div class="callout" style="max-width:min(96vw,1140px);align-self:center;width:100%;padding:clamp(0.7rem,1.4vw,1.2rem)">
+          <b style="color:var(--accent);font-size:var(--small-size)">핵심 전제</b>
+          <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">인덱싱과 질의는 <b>반드시 같은 임베딩 모델</b>(<code class="inl">EMBEDDING_MODEL</code>)을 써야 한다. 모델이 다르면 벡터 공간이 달라 검색이 엉뚱해진다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 실습 로드맵 -->
+  <section class="slide t-autumn-b" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기</div>
+        <h2 class="head">4부 · <span class="accent">문서 → 벡터DB → 검색 → 답</span></h2>
+        <div class="grid grid-4" style="max-width:min(96vw,1160px)">
+          <div class="card"><span class="step-badge"><span class="num">1</span>1부 · 준비</span><p class="lead" style="margin-top:0.5em">Chroma 설치 + <code class="inl">app/chunking.py</code> 겹침 청킹</p></div>
+          <div class="card"><span class="step-badge"><span class="num">2</span>2부 · 인덱싱</span><p class="lead" style="margin-top:0.5em"><code class="inl">app/vectorstore.py</code> + 로더 + <code class="inl">index_docs.py</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">3</span>3부 · 검색+생성</span><p class="lead" style="margin-top:0.5em"><code class="inl">app/rag.py</code> + <code class="inl">/ask</code> (+선택 <code class="inl">/search</code>)</p></div>
+          <div class="card"><span class="step-badge"><span class="num">4</span>4부 · 대안</span><p class="lead" style="margin-top:0.5em">pgvector로 같은 <code class="inl">search</code> — 교체 가능성</p></div>
+        </div>
+        <p class="note">작업 디렉터리는 docpilot 프로젝트 루트. 서버는 week06과 같이 <code class="inl">uvicorn app.main:app --reload</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 1부 1단계 Chroma 설치 + 설정 -->
+  <section class="slide t-autumn-b" aria-label="1부 1단계 Chroma 설치">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 1단계 · 실행 확인</div>
+        <h2 class="head">Chroma 설치 + <span class="accent">설정</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 로컬 벡터DB + PDF 로더</span></div>
+<pre class="dense"><span class="tok-cmd">pip</span> install <span class="tok-st">"chromadb&gt;=0.5"</span> <span class="tok-st">"pypdf&gt;=4.0"</span>
+
+<span class="tok-cm"># 확인</span>
+<span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"import chromadb; print('chroma', chromadb.__version__)"</span></pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">.env — RAG 설정 추가</span></div>
+<pre class="dense"><span class="tok-cm"># RAG</span>
+<span class="tok-kw">CHROMA_DIR</span>=<span class="tok-st">./chroma_data</span>
+<span class="tok-kw">RAG_COLLECTION</span>=<span class="tok-st">docpilot</span>
+<span class="tok-kw">CHUNK_SIZE</span>=<span class="tok-nm">600</span>
+<span class="tok-kw">CHUNK_OVERLAP</span>=<span class="tok-nm">100</span>
+<span class="tok-kw">TOP_K</span>=<span class="tok-nm">4</span></pre>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/config.py — Settings 안에 추가</span></div>
+<pre class="dense">    <span class="tok-cm"># RAG</span>
+    chroma_dir: <span class="tok-fl">str</span> = <span class="tok-st">"./chroma_data"</span>
+    rag_collection: <span class="tok-fl">str</span> = <span class="tok-st">"docpilot"</span>
+    chunk_size: <span class="tok-fl">int</span> = <span class="tok-nm">600</span>
+    chunk_overlap: <span class="tok-fl">int</span> = <span class="tok-nm">100</span>
+    top_k: <span class="tok-fl">int</span> = <span class="tok-nm">4</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">chroma 0.5.x</code>. 그리고 <code class="inl">python -c "from app.config import get_settings; s=get_settings(); print(s.chroma_dir, s.chunk_size, s.top_k)"</code> → <code class="inl">./chroma_data 600 4</code></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 1부 2단계 청킹 유틸 -->
+  <section class="slide t-autumn-b" aria-label="1부 2단계 청킹 유틸">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 2단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">app/chunking.py</code> — <span class="accent">겹침 청킹</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/chunking.py</span></div>
+<pre class="dense"><span class="tok-kw">from</span> __future__ <span class="tok-kw">import</span> annotations
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">chunk_text</span>(text: <span class="tok-fl">str</span>, chunk_size: <span class="tok-fl">int</span> = <span class="tok-nm">600</span>,
+               overlap: <span class="tok-fl">int</span> = <span class="tok-nm">100</span>) -&gt; <span class="tok-fl">list</span>[<span class="tok-fl">str</span>]:
+    <span class="tok-st">"""문자 기준 슬라이딩 윈도로 자른다(겹침 포함)."""</span>
+    text = <span class="tok-st">" "</span>.join(text.split())  <span class="tok-cm"># 공백/개행 정규화</span>
+    <span class="tok-kw">if not</span> text:
+        <span class="tok-kw">return</span> []
+    <span class="tok-kw">if</span> chunk_size &lt;= overlap:
+        <span class="tok-kw">raise</span> <span class="tok-fn">ValueError</span>(<span class="tok-st">"chunk_size must be greater than overlap"</span>)
+
+    chunks: <span class="tok-fl">list</span>[<span class="tok-fl">str</span>] = []
+    start = <span class="tok-nm">0</span>
+    step = chunk_size - overlap
+    <span class="tok-kw">while</span> start &lt; <span class="tok-fn">len</span>(text):
+        end = start + chunk_size
+        chunks.append(text[start:end])
+        start += step
+    <span class="tok-kw">return</span> chunks</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 확인</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"
+from app.chunking import chunk_text
+c = chunk_text('가나다라마바사'*60,
+               chunk_size=100, overlap=20)
+print('청크 수:', len(c),
+      '| 첫 청크 길이:', len(c[0]))
+"</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">청크가 <b>여러 개</b>로 쪼개지고 <b>첫 청크 길이가 100</b>이면 성공. <code class="inl">step = size − overlap</code>만큼 밀며 겹치게 자른다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 2부 3단계 vectorstore.py (핵심 앵커) -->
+  <section class="slide t-autumn-b" aria-label="2부 3단계 벡터스토어">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 3단계 · 핵심</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">app/vectorstore.py</code> — <span class="accent">저장 · 검색</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/vectorstore.py — 컬렉션 + upsert</span></div>
+<pre class="xdense"><span class="tok-kw">from</span> functools <span class="tok-kw">import</span> lru_cache
+<span class="tok-kw">import</span> chromadb
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+<span class="tok-kw">from</span> app.embeddings <span class="tok-kw">import</span> embed   <span class="tok-cm"># week07 재사용</span>
+
+
+<span class="tok-kw">@lru_cache</span>
+<span class="tok-kw">def</span> <span class="tok-fn">get_collection</span>():
+    <span class="tok-st">"""디스크에 저장되는 Chroma 컬렉션(1회 초기화)."""</span>
+    settings = get_settings()
+    client = chromadb.PersistentClient(path=settings.chroma_dir)
+    <span class="tok-kw">return</span> client.get_or_create_collection(
+        name=settings.rag_collection,
+        metadata={<span class="tok-st">"hnsw:space"</span>: <span class="tok-st">"cosine"</span>},  <span class="tok-cm"># 코사인 거리</span>
+    )
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">add_chunks</span>(doc_id: <span class="tok-fl">str</span>, chunks: <span class="tok-fl">list</span>[<span class="tok-fl">str</span>], source: <span class="tok-fl">str</span>) -&gt; <span class="tok-fl">int</span>:
+    <span class="tok-st">"""조각들을 임베딩해 컬렉션에 upsert. 저장 개수 반환."""</span>
+    <span class="tok-kw">if not</span> chunks:
+        <span class="tok-kw">return</span> <span class="tok-nm">0</span>
+    vectors = embed(chunks)  <span class="tok-cm"># (n, dim), 정규화됨</span>
+    ids = [<span class="tok-st">f"{doc_id}:{i}"</span> <span class="tok-kw">for</span> i <span class="tok-kw">in</span> <span class="tok-fn">range</span>(<span class="tok-fn">len</span>(chunks))]
+    metadatas = [{<span class="tok-st">"doc_id"</span>: doc_id, <span class="tok-st">"source"</span>: source,
+                  <span class="tok-st">"chunk_index"</span>: i} <span class="tok-kw">for</span> i <span class="tok-kw">in</span> <span class="tok-fn">range</span>(<span class="tok-fn">len</span>(chunks))]
+    get_collection().upsert(
+        ids=ids, documents=chunks,
+        embeddings=vectors.tolist(), metadatas=metadatas)
+    <span class="tok-kw">return</span> <span class="tok-fn">len</span>(chunks)</pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">핵심 설계</b>
+              <p class="lead" style="margin-top:0.35em">임베딩은 우리가 <b>직접 계산해</b> 넣으므로 <code class="inl">embedding_function</code>은 지정하지 않는다. 컬렉션은 <code class="inl">@lru_cache</code>로 <b>1회만</b> 연다.</p>
+            </div>
+            <div class="note"><code class="inl">metadata={"hnsw:space": "cosine"}</code>로 <b>코사인 거리</b> 인덱스를 쓴다. 인덱싱·질의 임베딩 모델 <b>일치</b>가 검색 품질의 전제.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 2부 3단계 search 공개 함수 (앵커 강조) -->
+  <section class="slide t-autumn-b" aria-label="2부 3단계 search 공개 함수">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 3단계 · 표준 검색 인터페이스</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">search</code> — <span class="accent">week09~11이 재사용</span>할 함수</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/vectorstore.py — 공개 검색 함수</span></div>
+<pre class="xdense"><span class="tok-cm"># 앵커: 이 search를 week09~11에서 그대로 "도구(tool)"로 재사용.</span>
+<span class="tok-cm">#   재사용은 항상 `from app.vectorstore import search`로 통일하며,</span>
+<span class="tok-cm">#   반환형 list[dict](keys: text, source, score)가 표준 인터페이스.</span>
+<span class="tok-kw">def</span> <span class="tok-fn">search</span>(query: <span class="tok-fl">str</span>, top_k: <span class="tok-fl">int</span> | <span class="tok-kw">None</span> = <span class="tok-kw">None</span>) -&gt; <span class="tok-fl">list</span>[<span class="tok-fl">dict</span>]:
+    <span class="tok-st">"""질문을 임베딩해 가장 가까운 조각 top_k를 반환."""</span>
+    settings = get_settings()
+    k = top_k <span class="tok-kw">or</span> settings.top_k
+    q_vec = embed([query])[<span class="tok-nm">0</span>]
+    res = get_collection().query(
+        query_embeddings=[q_vec.tolist()], n_results=k)
+
+    hits: <span class="tok-fl">list</span>[<span class="tok-fl">dict</span>] = []
+    docs = res.get(<span class="tok-st">"documents"</span>, [[]])[<span class="tok-nm">0</span>]
+    metas = res.get(<span class="tok-st">"metadatas"</span>, [[]])[<span class="tok-nm">0</span>]
+    dists = res.get(<span class="tok-st">"distances"</span>, [[]])[<span class="tok-nm">0</span>]
+    <span class="tok-kw">for</span> doc, meta, dist <span class="tok-kw">in</span> <span class="tok-fn">zip</span>(docs, metas, dists):
+        hits.append({
+            <span class="tok-st">"text"</span>: doc,
+            <span class="tok-st">"source"</span>: meta.get(<span class="tok-st">"source"</span>),
+            <span class="tok-st">"chunk_index"</span>: meta.get(<span class="tok-st">"chunk_index"</span>),
+            <span class="tok-st">"score"</span>: <span class="tok-fn">round</span>(<span class="tok-nm">1</span> - dist, <span class="tok-nm">4</span>),  <span class="tok-cm"># 거리→유사도 근사</span>
+        })
+    <span class="tok-kw">return</span> hits</pre>
+          </div>
+          <div class="stack">
+            <div class="warn">
+              <b style="color:var(--ink)">왜 중요한가</b>
+              <p class="lead" style="margin-top:0.35em;color:var(--ink)"><code class="inl">search</code>는 이번 주 <code class="inl">/ask</code>뿐 아니라 <b>week09 Agent의 "도구"</b>로도 호출된다. 공개 함수 = <code class="inl">from app.vectorstore import search</code>.</p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 확인 (컬렉션 생성)</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"from app.vectorstore import get_collection; print('collection ok:', get_collection().name)"</span></pre>
+            </div>
+            <div class="note">기대: <code class="inl">collection ok: docpilot</code>. 실행 후 <code class="inl">./chroma_data/</code>가 생긴다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. 2부 4·5단계 로더 + 인덱싱 스크립트 -->
+  <section class="slide t-autumn-b" aria-label="2부 4 5단계 로더와 인덱싱 스크립트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 4·5단계</div>
+        <h2 class="head">문서 로더 + <span class="accent">인덱싱 CLI</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/loader.py — txt·md·pdf → 텍스트</span></div>
+<pre class="xdense"><span class="tok-kw">from</span> __future__ <span class="tok-kw">import</span> annotations
+<span class="tok-kw">from</span> pathlib <span class="tok-kw">import</span> Path
+<span class="tok-kw">from</span> pypdf <span class="tok-kw">import</span> PdfReader
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">load_text</span>(path: <span class="tok-fl">str</span> | Path) -&gt; <span class="tok-fl">str</span>:
+    path = Path(path)
+    suffix = path.suffix.lower()
+    <span class="tok-kw">if</span> suffix <span class="tok-kw">in</span> {<span class="tok-st">".txt"</span>, <span class="tok-st">".md"</span>}:
+        <span class="tok-kw">return</span> path.read_text(encoding=<span class="tok-st">"utf-8"</span>,
+                              errors=<span class="tok-st">"ignore"</span>)
+    <span class="tok-kw">if</span> suffix == <span class="tok-st">".pdf"</span>:
+        reader = PdfReader(<span class="tok-fn">str</span>(path))
+        <span class="tok-kw">return</span> <span class="tok-st">"\n"</span>.join(
+            (page.extract_text() <span class="tok-kw">or</span> <span class="tok-st">""</span>)
+            <span class="tok-kw">for</span> page <span class="tok-kw">in</span> reader.pages)
+    <span class="tok-kw">raise</span> <span class="tok-fn">ValueError</span>(<span class="tok-st">f"unsupported file type: {suffix}"</span>)</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">scripts/index_docs.py — 사전 1회 인덱싱</span></div>
+<pre class="xdense"><span class="tok-kw">import</span> argparse, sys
+<span class="tok-kw">from</span> pathlib <span class="tok-kw">import</span> Path
+sys.path.insert(<span class="tok-nm">0</span>, <span class="tok-fn">str</span>(Path(__file__).resolve().parent.parent))
+
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+<span class="tok-kw">from</span> app.chunking <span class="tok-kw">import</span> chunk_text
+<span class="tok-kw">from</span> app.loader <span class="tok-kw">import</span> load_text
+<span class="tok-kw">from</span> app.vectorstore <span class="tok-kw">import</span> add_chunks
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">main</span>() -&gt; <span class="tok-kw">None</span>:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(<span class="tok-st">"path"</span>, help=<span class="tok-st">"파일 또는 폴더"</span>)
+    args = parser.parse_args()
+    s = get_settings(); target = Path(args.path)
+    files = [target] <span class="tok-kw">if</span> target.is_file() <span class="tok-kw">else</span> <span class="tok-fn">sorted</span>(
+        p <span class="tok-kw">for</span> p <span class="tok-kw">in</span> target.rglob(<span class="tok-st">"*"</span>)
+        <span class="tok-kw">if</span> p.suffix.lower() <span class="tok-kw">in</span> {<span class="tok-st">".txt"</span>, <span class="tok-st">".md"</span>, <span class="tok-st">".pdf"</span>})
+    total = <span class="tok-nm">0</span>
+    <span class="tok-kw">for</span> f <span class="tok-kw">in</span> files:
+        chunks = chunk_text(load_text(f), s.chunk_size, s.chunk_overlap)
+        n = add_chunks(doc_id=f.stem, chunks=chunks, source=f.name)
+        total += n; <span class="tok-fn">print</span>(<span class="tok-st">f"indexed {f.name}: {n} chunks"</span>)
+    <span class="tok-fn">print</span>(<span class="tok-st">f"done. total chunks = {total}"</span>)</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 2부 인덱싱 실행 확인 -->
+  <section class="slide t-autumn-b" aria-label="2부 인덱싱 실행 확인">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 5단계 · 실행 확인</div>
+        <h2 class="head">샘플 문서를 <span class="accent">인덱싱</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 샘플 만들고 인덱싱</span></div>
+<pre class="dense"><span class="tok-cmd">mkdir</span> <span class="tok-fl">-p sample_docs</span>
+<span class="tok-cmd">cat</span> <span class="tok-fl">&gt; sample_docs/docpilot.md</span> <span class="tok-op">&lt;&lt;'EOF'</span>
+<span class="tok-fl"># docpilot 소개</span>
+<span class="tok-fl">docpilot은 문서 기반 AI 도우미다.</span>
+<span class="tok-fl">배포는 Kubernetes에 Deployment/Service로 한다.</span>
+<span class="tok-fl">RAG는 관련 조각을 검색해 LLM에 넣어 답한다.</span>
+<span class="tok-fl">임베딩 모델은 all-MiniLM-L6-v2, 차원은 384다.</span>
+<span class="tok-op">EOF</span>
+
+<span class="tok-cmd">python</span> <span class="tok-fl">scripts/index_docs.py sample_docs</span></pre>
+          </div>
+          <div class="stack">
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">indexed docpilot.md: N chunks</code> / <code class="inl">done. total chunks = N</code></p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 저장 개수 확인</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"from app.vectorstore import get_collection; print('저장된 조각 수:', get_collection().count())"</span></pre>
+            </div>
+            <div class="note">기대: <code class="inl">저장된 조각 수: N</code> (0보다 큼). <b>(선택 6단계)</b> week03 업로드 흐름과 연결해 <code class="inl">POST /documents/index</code>로 업로드 즉시 인덱싱도 가능.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 3부 7단계 rag.py -->
+  <section class="slide t-autumn-b" aria-label="3부 7단계 rag 조립">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 7단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">app/rag.py</code> — <span class="accent">검색 → 주입 → 생성</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/rag.py</span></div>
+<pre class="xdense"><span class="tok-kw">from</span> app <span class="tok-kw">import</span> llm                       <span class="tok-cm"># week06</span>
+<span class="tok-kw">from</span> app.vectorstore <span class="tok-kw">import</span> search        <span class="tok-cm"># 표준 검색</span>
+
+RAG_SYSTEM = (
+    <span class="tok-st">"You are docpilot, a document-grounded assistant. "</span>
+    <span class="tok-st">"Answer ONLY using the provided context. "</span>
+    <span class="tok-st">"If the answer is not in the context, say "</span>
+    <span class="tok-st">"'문서에서 근거를 찾지 못했습니다.' in Korean. "</span>
+    <span class="tok-st">"Cite sources by their [source] tag. Answer in Korean."</span>
+)
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">build_context</span>(hits: <span class="tok-fl">list</span>[<span class="tok-fl">dict</span>]) -&gt; <span class="tok-fl">str</span>:
+    blocks = [<span class="tok-st">f"[source: {h['source']} #{h['chunk_index']}]\n{h['text']}"</span>
+              <span class="tok-kw">for</span> h <span class="tok-kw">in</span> hits]
+    <span class="tok-kw">return</span> <span class="tok-st">"\n\n---\n\n"</span>.join(blocks)
+
+
+<span class="tok-kw">async def</span> <span class="tok-fn">answer</span>(question: <span class="tok-fl">str</span>, top_k=<span class="tok-kw">None</span>) -&gt; <span class="tok-fl">dict</span>:
+    hits = search(question, top_k=top_k)
+    <span class="tok-kw">if not</span> hits:
+        <span class="tok-kw">return</span> {<span class="tok-st">"answer"</span>: <span class="tok-st">"인덱싱된 문서가 없습니다..."</span>, <span class="tok-st">"sources"</span>: []}
+    context = build_context(hits)
+    user_prompt = (<span class="tok-st">f"컨텍스트:\n{context}\n\n질문: {question}\n\n"</span>
+                   <span class="tok-st">"위 컨텍스트만 근거로 답하고, 출처를 밝혀줘."</span>)
+    messages = llm.build_messages(user_prompt, system=RAG_SYSTEM)
+    reply = <span class="tok-kw">await</span> llm.complete(messages, temperature=<span class="tok-nm">0.1</span>)
+    sources = [{<span class="tok-st">"source"</span>: h[<span class="tok-st">"source"</span>], <span class="tok-st">"chunk_index"</span>: h[<span class="tok-st">"chunk_index"</span>],
+                <span class="tok-st">"score"</span>: h[<span class="tok-st">"score"</span>]} <span class="tok-kw">for</span> h <span class="tok-kw">in</span> hits]
+    <span class="tok-kw">return</span> {<span class="tok-st">"answer"</span>: reply, <span class="tok-st">"sources"</span>: sources}</pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">할루시네이션 억제</b>
+              <p class="lead" style="margin-top:0.35em">"<b>컨텍스트에 없으면 모른다고 답하라</b>"는 규칙을 시스템 프롬프트에 넣는다. 사실 답변이라 <code class="inl">temperature=0.1</code>로 낮게.</p>
+            </div>
+            <div class="note">각 조각을 <code class="inl">[source: 파일 #인덱스]</code> 태그와 함께 넣어 <b>출처 인용</b>이 가능하게 한다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. 3부 8단계 /ask 엔드포인트 -->
+  <section class="slide t-autumn-b" aria-label="3부 8단계 ask 엔드포인트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 8단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/ask</code> — <span class="accent">docpilot의 핵심 기능</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 추가</span></div>
+<pre class="dense"><span class="tok-kw">from</span> pydantic <span class="tok-kw">import</span> BaseModel, Field
+<span class="tok-kw">from</span> app <span class="tok-kw">import</span> rag
+
+
+<span class="tok-kw">class</span> <span class="tok-fn">AskRequest</span>(BaseModel):
+    question: <span class="tok-fl">str</span> = Field(..., min_length=<span class="tok-nm">1</span>,
+                          max_length=<span class="tok-nm">2000</span>)
+    top_k: <span class="tok-fl">int</span> | <span class="tok-kw">None</span> = Field(
+        default=<span class="tok-kw">None</span>, ge=<span class="tok-nm">1</span>, le=<span class="tok-nm">20</span>)
+
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/ask"</span>)
+<span class="tok-kw">async def</span> <span class="tok-fn">ask</span>(req: AskRequest) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""문서 기반(RAG) 질의응답. 답변 + 출처."""</span>
+    <span class="tok-kw">return</span> <span class="tok-kw">await</span> rag.answer(req.question, top_k=req.top_k)</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 서버 켜고 물어보기</span></div>
+<pre class="dense"><span class="tok-cmd">uvicorn</span> <span class="tok-fl">app.main:app --reload</span>
+
+<span class="tok-cmd">curl</span> <span class="tok-fl">-s -X POST localhost:8000/ask</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"question":"임베딩 모델과 벡터 차원은?"}'</span> \
+  <span class="tok-op">|</span> <span class="tok-cmd">python</span> <span class="tok-fl">-m json.tool</span></pre>
+            </div>
+            <div class="note"><code class="inl">BaseModel</code>·<code class="inl">Field</code>는 week06/07에서 이미 import됨. 없으면 <code class="inl">from pydantic import BaseModel, Field</code> 추가.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 3부 8단계 실행 확인 (있는/없는 질문) -->
+  <section class="slide t-autumn-b" aria-label="3부 실행 확인 근거 검증">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 8단계 · 실행 확인 (핵심 평가)</div>
+        <h2 class="head">있으면 <span class="accent">근거로</span>, 없으면 <span class="accent">솔직하게</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">문서에 있는 질문 → 근거 있는 답 + 출처</span></div>
+<pre class="dense"><span class="tok-op">{</span>
+  <span class="tok-st">"answer"</span>: <span class="tok-st">"docpilot은 all-MiniLM-L6-v2</span>
+<span class="tok-st">    임베딩 모델을 사용하며 벡터 차원은</span>
+<span class="tok-st">    384입니다. [source: docpilot.md]"</span>,
+  <span class="tok-st">"sources"</span>: [
+    <span class="tok-op">{</span><span class="tok-st">"source"</span>: <span class="tok-st">"docpilot.md"</span>,
+     <span class="tok-st">"chunk_index"</span>: <span class="tok-nm">0</span>, <span class="tok-st">"score"</span>: <span class="tok-nm">0.71</span><span class="tok-op">}</span>
+  ]
+<span class="tok-op">}</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 문서에 없는 질문</span></div>
+<pre class="dense"><span class="tok-cmd">curl</span> <span class="tok-fl">-s -X POST localhost:8000/ask</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"question":"docpilot 월 구독</span>
+<span class="tok-fl">       요금은 얼마야?"}'</span></pre>
+            </div>
+            <div class="warn">
+              <b style="color:var(--ink)">확인 (할루시네이션 억제)</b>
+              <p class="lead" style="margin-top:0.3em;color:var(--ink)"><code class="inl">"문서에서 근거를 찾지 못했습니다."</code> → 모르면 <b>지어내지 않고</b> 솔직히 답한다. <b>이 검증이 Block 2 평가 포인트.</b></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 3부 9단계 /search 디버깅 -->
+  <section class="slide t-autumn-b" aria-label="3부 9단계 search 디버깅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 9단계 · 선택 · 디버깅</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/search</code> — <span class="accent">검색만 따로 진단</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 추가 (선택)</span></div>
+<pre class="dense"><span class="tok-kw">from</span> app.vectorstore <span class="tok-kw">import</span> search <span class="tok-kw">as</span> vs_search
+
+
+<span class="tok-kw">@app.get</span>(<span class="tok-st">"/search"</span>)
+<span class="tok-kw">async def</span> <span class="tok-fn">search_endpoint</span>(
+        q: <span class="tok-fl">str</span>, top_k: <span class="tok-fl">int</span> = <span class="tok-nm">4</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-kw">return</span> {<span class="tok-st">"query"</span>: q,
+            <span class="tok-st">"hits"</span>: vs_search(q, top_k=top_k)}</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 검색 결과만 보기</span></div>
+<pre class="dense"><span class="tok-cmd">curl</span> <span class="tok-fl">-s "localhost:8000/search?</span>
+<span class="tok-fl">  q=배포는%20어떻게%20하나&top_k=2"</span> \
+  <span class="tok-op">|</span> <span class="tok-cmd">python</span> <span class="tok-fl">-m json.tool</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">배포 관련 조각이 상위에 <code class="inl">score</code>와 함께 나온다 → 검색이 <b>의미 기반</b>으로 동작. 생성 없이 <b>RAG 품질을 빠르게 진단</b>.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 4부 pgvector 대안 -->
+  <section class="slide t-autumn-b" aria-label="4부 pgvector 대안">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">4부 · 10·11단계 · 대안</div>
+        <h2 class="head">pgvector — <span class="accent">SQL로 검색</span> (교체 가능한 부품)</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">SQL — pgvector 확장 + 테이블</span></div>
+<pre class="xdense"><span class="tok-cm">-- pgvector/pgvector:pg16 이미지 사용</span>
+<span class="tok-kw">CREATE EXTENSION IF NOT EXISTS</span> vector;
+
+<span class="tok-kw">CREATE TABLE IF NOT EXISTS</span> doc_chunks (
+    id          <span class="tok-fl">BIGSERIAL PRIMARY KEY</span>,
+    doc_id      <span class="tok-fl">TEXT NOT NULL</span>,
+    source      <span class="tok-fl">TEXT NOT NULL</span>,
+    chunk_index <span class="tok-fl">INT  NOT NULL</span>,
+    content     <span class="tok-fl">TEXT NOT NULL</span>,
+    embedding   <span class="tok-nm">vector(384)</span> <span class="tok-fl">NOT NULL</span>  <span class="tok-cm">-- MiniLM 차원</span>
+);
+
+<span class="tok-cm">-- 코사인 거리용 근사 인덱스</span>
+<span class="tok-kw">CREATE INDEX IF NOT EXISTS</span> doc_chunks_embedding_idx
+    <span class="tok-kw">ON</span> doc_chunks <span class="tok-kw">USING</span> hnsw (embedding vector_cosine_ops);</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/vectorstore_pg.py — 동일 인터페이스</span></div>
+<pre class="xdense"><span class="tok-kw">def</span> <span class="tok-fn">search</span>(query: <span class="tok-fl">str</span>, top_k=<span class="tok-kw">None</span>) -&gt; <span class="tok-fl">list</span>[<span class="tok-fl">dict</span>]:
+    k = top_k <span class="tok-kw">or</span> get_settings().top_k
+    q_vec = embed([query])[<span class="tok-nm">0</span>]
+    <span class="tok-kw">with</span> _connect() <span class="tok-kw">as</span> conn, conn.cursor() <span class="tok-kw">as</span> cur:
+        <span class="tok-cm"># &lt;=&gt; 는 코사인 거리 연산자. 1 - 거리 = 유사도</span>
+        cur.execute(
+            <span class="tok-st">"SELECT source, chunk_index, content, "</span>
+            <span class="tok-st">"1 - (embedding &lt;=&gt; %s) AS score "</span>
+            <span class="tok-st">"FROM doc_chunks ORDER BY embedding &lt;=&gt; %s "</span>
+            <span class="tok-st">"LIMIT %s"</span>, (q_vec, q_vec, k))
+        rows = cur.fetchall()
+    <span class="tok-kw">return</span> [{<span class="tok-st">"source"</span>: r[<span class="tok-nm">0</span>], <span class="tok-st">"chunk_index"</span>: r[<span class="tok-nm">1</span>],
+             <span class="tok-st">"text"</span>: r[<span class="tok-nm">2</span>], <span class="tok-st">"score"</span>: <span class="tok-fn">round</span>(<span class="tok-fn">float</span>(r[<span class="tok-nm">3</span>]), <span class="tok-nm">4</span>)}
+            <span class="tok-kw">for</span> r <span class="tok-kw">in</span> rows]</pre>
+          </div>
+        </div>
+        <p class="note"><code class="inl">app/rag.py</code>에서 <code class="inl">from app.vectorstore_pg import search</code> <b>한 줄만</b> 바꾸면 <code class="inl">/ask</code>가 그대로 동작 → 벡터DB는 <b>교체 가능한 부품</b>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 트러블슈팅 -->
+  <section class="slide t-autumn-b" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">막히면 <span class="accent">여기부터</span></h2>
+        <div class="card" style="max-width:min(97vw,1200px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:30%">증상</th><th style="width:30%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td class="em"><code>/ask</code>가 항상 "근거 못 찾음"</td><td>인덱싱 안 됨/컬렉션 비었음</td><td><code>get_collection().count()</code>로 조각 수 확인. 인덱싱 먼저</td></tr>
+              <tr><td class="em">검색 결과가 엉뚱함</td><td>인덱싱·질의 임베딩 모델 불일치</td><td>둘 다 <code>EMBEDDING_MODEL</code> 동일하게. 재인덱싱</td></tr>
+              <tr><td class="em">컨텍스트 무시하고 지어냄</td><td>시스템 프롬프트 약함/temp 높음</td><td><code>RAG_SYSTEM</code> 강화, <code>temperature=0.1</code></td></tr>
+              <tr><td class="em">청크가 너무 크다/작다</td><td><code>CHUNK_SIZE</code> 부적절</td><td>300~800 사이, overlap 10~20%</td></tr>
+              <tr><td class="em">PDF에서 텍스트 안 나옴</td><td>스캔 이미지 PDF(레이어 없음)</td><td>OCR 필요(범위 밖). 텍스트 PDF로 테스트</td></tr>
+              <tr><td class="em">Chroma <code>readonly database</code></td><td>권한/경로 문제</td><td><code>CHROMA_DIR</code> 쓰기 권한. 컨테이너면 볼륨 마운트</td></tr>
+              <tr><td class="em">pgvector <code>type "vector" does not exist</code></td><td>확장 미설치</td><td><code>CREATE EXTENSION vector;</code>, <code>pgvector/pgvector</code> 이미지</td></tr>
+              <tr><td class="em">pgvector 차원 오류</td><td>테이블 <code>vector(N)</code> ≠ 모델 차원</td><td>모델 차원(MiniLM=384)에 맞춰 재생성</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 과제 + 체크리스트 -->
+  <section class="slide t-autumn-b" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / Block 2 미니 과제 — 평가 기준</div>
+        <h2 class="head">문서 기반으로 답하는 <span class="accent">docpilot 완성</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">제출물 (리포 + README + 실행 로그/스크린샷)</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.22rem,0.75vh,0.48rem)">
+              <li><span class="mk">1</span><span><b>필수</b> — <code class="inl">index_docs.py</code>+<code class="inl">/ask</code> 동작, <b>자기 문서</b>로 RAG 데모(있는 질문=근거 답, 없는 질문=근거 못 찾음)</span></li>
+              <li><span class="mk">2</span><span><b>필수</b> — 답변에 <b>출처(source/chunk)</b> 표시</span></li>
+              <li><span class="mk">3</span><span><b>도전</b> — <code class="inl">CHUNK_SIZE</code>/<code class="inl">TOP_K</code>를 바꿔 답 품질 비교, 최적값·이유</span></li>
+              <li><span class="mk">4</span><span><b>도전</b> — Chroma·pgvector 둘 다 붙여 속도·운영 편의 비교</span></li>
+              <li><span class="mk">5</span><span><b>도전</b> — <code class="inl">/ask</code>를 스트리밍(week06 방식)으로 확장</span></li>
+            </ul>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.2rem,0.7vh,0.44rem)">
+              <li><span class="mk">✓</span><span><code class="inl">chromadb</code>·<code class="inl">pypdf</code> 설치·requirements 반영</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">app/chunking.py</code> 겹침 청킹 확인</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">app/vectorstore.py</code>(add/search, 코사인) — week07 <code class="inl">embed</code> 재사용</span></li>
+              <li><span class="mk">✓</span><span>인덱싱 후 <code class="inl">count()</code>로 조각 수 확인</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">app/rag.py</code> 근거-제한 시스템 프롬프트</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">/ask</code>: 있는 질문=답+출처, 없는 질문=근거 못 찾음</span></li>
+              <li><span class="mk">✓</span><span>(대안) pgvector로 동일 검색 성공</span></li>
+            </ul>
+          </div>
+        </div>
+        <p class="note">평가 관점: <b>4단계(인덱싱→검색→주입→생성)가 실제로 도는가, 출처가 보이는가, 없는 걸 지어내지 않는가.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. 다음 주 예고 -->
+  <section class="slide t-autumn-b" aria-label="다음 주 예고">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Next · Week 09 · Block 3 시작</div>
+        <h2 class="head" style="font-size:var(--title-size)">다음 주 —<br/><span class="accent">Agent 기초</span></h2>
+        <p class="hero-line" style="max-width:66ch">지금까지 docpilot은 "물으면 답하는" <b style="color:var(--ink)">수동적</b> 존재였다. 다음 주부터 <b style="color:var(--ink)">스스로 도구를 골라 쓰는 Agent</b>로 진화한다. <b style="color:var(--ink)">tool/function calling</b>과 <b style="color:var(--ink)">ReAct(추론+행동)</b>를 배워 검색·계산·API 호출을 직접 부르게 만든다.</p>
+        <p class="note">이번 주 <code class="inl">search</code>도 <b>Agent가 호출하는 하나의 "도구"</b>가 된다.</p>
+        <div class="hero-evo" style="margin-top:0.4em">
+          <span class="chip" style="border-color:var(--terracotta-deep)">W08 RAG <code class="inl" style="background:none;color:var(--teal)">/ask</code></span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--plum) 25%,var(--paper))">W09 Agent · tool calling · ReAct</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
