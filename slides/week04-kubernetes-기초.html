@@ -1,0 +1,1332 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 04 — Kubernetes 기초</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01 · week02 · week03 덱과 동일한 디자인 시스템 계승
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* K8s 오브젝트 관계도 (Deployment → ReplicaSet → Pod + Service) */
+.k8sviz { display: grid; gap: clamp(0.5rem, 1.3vw, 1rem); max-width: min(94vw, 940px); align-self: center; width: 100%; }
+.k8s-deploy {
+  border-radius: 16px; padding: clamp(0.7rem, 1.5vw, 1.2rem);
+  background: color-mix(in srgb, var(--coral) 18%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14); box-shadow: var(--shadow-soft);
+}
+.k8s-tag { display:flex; align-items:center; gap:0.5em; font-family: var(--font-mono); font-weight:800; font-size: var(--small-size); color: var(--ink); }
+.k8s-tag .role { font-weight:600; color: var(--ink-soft); font-family: var(--font-sans); font-size: var(--micro-size); }
+.k8s-rs {
+  margin-top: clamp(0.5rem, 1.2vw, 0.9rem); border-radius: 12px;
+  padding: clamp(0.6rem, 1.3vw, 1rem);
+  background: color-mix(in srgb, var(--ochre) 22%, var(--paper));
+  border: 1px dashed color-mix(in srgb, var(--terracotta-deep) 42%, transparent);
+}
+.k8s-pods { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.5rem, 1.2vw, 0.9rem); margin-top: 0.55em; }
+.k8s-pod {
+  border-radius: 10px; padding: clamp(0.5rem, 1.1vw, 0.85rem); text-align:center;
+  background: var(--paper); border: 1px solid rgba(120,78,46,0.12); box-shadow: var(--shadow-soft);
+}
+.k8s-pod .pn { font-family: var(--font-mono); font-weight:800; font-size: var(--small-size); color: var(--ink); }
+.k8s-pod .ps { font-size: var(--micro-size); color: var(--ink-soft); margin-top:0.15em; }
+.k8s-svc {
+  border-radius: 14px; padding: clamp(0.65rem, 1.4vw, 1.1rem);
+  background: color-mix(in srgb, var(--teal) 28%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14); box-shadow: var(--shadow-soft);
+  display:flex; align-items:center; justify-content:space-between; gap:0.7em; flex-wrap:wrap;
+}
+.k8s-svc .sname { font-family: var(--font-mono); font-weight:800; font-size: var(--h3-size); color: var(--ink); }
+.k8s-selector { font-family: var(--font-mono); font-size: var(--micro-size); color: var(--accent); font-weight:700; }
+.k8s-arrow { text-align:center; font-family: var(--font-mono); font-weight:800; color: var(--accent); font-size: var(--small-size); line-height:1; }
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3, .k8s-pods { grid-template-columns: 1fr; }
+  .nav-dots { display: none; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 04</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">24</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-mid-a" aria-label="타이틀">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · Block 1</span>
+      <div class="eyebrow">Week 04 — Kubernetes 기초</div>
+      <h1 class="title">컨테이너 →<br/><span style="color:var(--accent)">쿠버네티스 배포</span></h1>
+      <p class="hero-line">Compose로 한 대에서 돌리던 <b style="color:var(--ink)">docpilot</b>을 로컬 K8s(kind) 클러스터에 <b style="color:var(--ink)">Deployment + Service</b>로 배포하고, Pod가 스스로 살아나는 자가치유를 눈으로 확인한다.</p>
+      <div class="hero-evo">
+        <span class="chip">지난주 Compose <code class="inl" style="background:none;color:var(--teal)">web + DB</code></span>
+        <span class="arrow">→</span>
+        <span class="chip">kind 클러스터 · Deployment(replicas=2) + Service</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-mid-a" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.35" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:74ch">
+          <li><span class="mk">1</span><span>오케스트레이터가 왜 필요한지(<b>스케줄링·자가치유·확장</b>)를 한 문장으로 설명한다.</span></li>
+          <li><span class="mk">2</span><span><b>Pod / ReplicaSet / Deployment / Service</b>의 관계를 그림으로 그린다.</span></li>
+          <li><span class="mk">3</span><span><code class="inl">kind</code>로 로컬 K8s 클러스터를 만들고 <code class="inl">kubectl</code>로 상태를 조회한다.</span></li>
+          <li><span class="mk">4</span><span>로컬 빌드 이미지를 <code class="inl">kind load docker-image</code>로 클러스터에 올린다.</span></li>
+          <li><span class="mk">5</span><span>Deployment + Service를 <code class="inl">apply</code>하고 <code class="inl">port-forward</code>로 접속을 확인한다.</span></li>
+          <li><span class="mk">6</span><span><code class="inl">replicas</code>를 조정하고 Pod 삭제 후 <b>자가치유</b>를 관찰한다.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 ① 왜 오케스트레이터 -->
+  <section class="slide t-mid-b" aria-label="왜 오케스트레이터인가">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ① / 왜 오케스트레이터인가</div>
+        <h2 class="head">Compose는 <span class="accent">한 대</span>, 실제 서비스는 <span class="accent">그 이상</span></h2>
+        <div class="grid grid-3" style="max-width:min(95vw,1080px)">
+          <div class="card"><b style="color:var(--accent)">스케줄링</b><p class="lead" style="margin-top:0.3em">"여유 있는 노드에 이 컨테이너를 알아서 배치해줘."</p></div>
+          <div class="card"><b style="color:var(--accent)">자가치유</b><p class="lead" style="margin-top:0.3em">"죽으면 다시 띄워. 항상 <b>N개</b>가 떠 있게 유지해줘."</p></div>
+          <div class="card"><b style="color:var(--accent)">확장</b><p class="lead" style="margin-top:0.3em">"트래픽이 늘면 복제본을 늘리고, 줄면 줄여줘."</p></div>
+        </div>
+        <div class="callout">
+          <b style="color:var(--accent);font-size:var(--small-size)">핵심 사고 전환 — 선언형(declarative)</b>
+          <p class="lead" style="margin-top:0.3em">K8s는 위 셋을 선언형으로 처리한다. 우리는 "<b>결과가 이래야 한다(desired state)</b>"만 YAML로 적고, 컨트롤러가 실제 상태를 그 선언에 계속 맞춘다(reconciliation loop). "이 명령을 실행해라(how)"가 아니라 "이렇게 돼 있어야 한다(what)"를 적는 것이 전환점이다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ② 핵심 오브젝트 표 -->
+  <section class="slide t-mid-b" aria-label="핵심 오브젝트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ② / 핵심 오브젝트</div>
+        <h2 class="head">네 가지 <span class="accent">오브젝트</span></h2>
+        <div class="card" style="max-width:min(96vw,1120px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:20%">오브젝트</th><th style="width:44%">한 줄 정의</th><th>docpilot 예</th></tr></thead>
+            <tbody>
+              <tr><td class="em">Pod</td><td>배포의 최소 단위. 1개 이상의 컨테이너를 묶은 것. IP를 하나 가진다.</td><td>uvicorn이 도는 docpilot 컨테이너 1개 = Pod 1개</td></tr>
+              <tr><td class="em">ReplicaSet</td><td>"동일한 Pod를 N개 유지"를 책임진다. 죽으면 다시 만든다.</td><td>docpilot Pod 2개 유지</td></tr>
+              <tr><td class="em">Deployment</td><td>ReplicaSet을 관리하며 <b>버전 롤아웃/롤백</b> 담당. 우리가 직접 다루는 상위 오브젝트.</td><td><code>docpilot</code> Deployment</td></tr>
+              <tr><td class="em">Service</td><td>여러 Pod 앞에 고정 이름·IP를 주는 <b>내부 로드밸런서</b>. Pod IP가 바뀌어도 접속 지점은 그대로.</td><td><code>docpilot</code> Service (ClusterIP)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ② 관계도 -->
+  <section class="slide t-autumn-a" aria-label="오브젝트 관계도">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ② / 관계도</div>
+        <h2 class="head">Deployment가 Pod를 <span class="accent">찍어내고</span>, Service가 <span class="accent">묶는다</span></h2>
+        <div class="k8sviz">
+          <div class="k8s-deploy">
+            <div class="k8s-tag">Deployment <span class="role">· 버전 · 롤아웃 관리</span></div>
+            <div class="k8s-rs">
+              <div class="k8s-tag" style="font-size:var(--micro-size)">ReplicaSet <span class="role">· 개수 유지 replicas=2</span></div>
+              <div class="k8s-pods">
+                <div class="k8s-pod"><div class="pn">Pod</div><div class="ps">docpilot 컨테이너 · IP 수시 변동</div></div>
+                <div class="k8s-pod"><div class="pn">Pod</div><div class="ps">docpilot 컨테이너 · IP 수시 변동</div></div>
+              </div>
+            </div>
+          </div>
+          <div class="k8s-arrow">▲ &nbsp; label selector: <span style="color:var(--accent)">app: docpilot</span> &nbsp; ▲</div>
+          <div class="k8s-svc">
+            <div><div class="sname">Service · docpilot</div><div class="ps" style="color:var(--ink-soft);font-size:var(--micro-size)">ClusterIP · 고정 이름/IP</div></div>
+            <span class="k8s-selector">selector로 위 Pod들에 부하 분산</span>
+          </div>
+        </div>
+        <p class="note"><b>왜 Service가 필요한가?</b> Pod는 언제든 죽고 다시 생기며 그때마다 IP가 바뀐다. 그래서 Pod IP로 직접 접속하면 안 된다. Service는 <code class="inl">label selector</code>(예: <code class="inl">app: docpilot</code>)로 대상 Pod들을 묶어 <b>바뀌지 않는 접속 지점</b>을 제공한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ③ kubectl -->
+  <section class="slide t-autumn-a" aria-label="kubectl 개념">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ③ / kubectl</div>
+        <h2 class="head">클러스터와 대화하는 <span class="accent">두 갈래</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--sage) 24%,var(--paper)),var(--paper))">
+              <span class="pill">선언형 · 권장</span>
+              <p class="lead" style="margin-top:0.4em"><code class="inl">kubectl apply -f &lt;file&gt;.yaml</code> — 원하는 상태를 파일로 선언. 반복 실행해도 안전(idempotent).</p>
+            </div>
+            <div class="card">
+              <span class="pill">명령형 · 디버깅용</span>
+              <p class="lead" style="margin-top:0.4em"><code class="inl">get / describe / logs / delete / scale</code> — 상태 조회·즉석 조작.</p>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 자주 쓰는 조회</span></div>
+<pre><span class="tok-cmd">kubectl</span> get pods           <span class="tok-cm"># Pod 목록과 상태</span>
+<span class="tok-cmd">kubectl</span> describe pod <span class="tok-fl">&lt;name&gt;</span>  <span class="tok-cm"># 이벤트·원인 상세(트러블슈팅 1순위)</span>
+<span class="tok-cmd">kubectl</span> logs <span class="tok-fl">&lt;pod&gt;</span>         <span class="tok-cm"># 컨테이너 로그</span></pre>
+            </div>
+            <p class="note">디버깅 3종 세트: <b><code class="inl">get</code></b>(무엇이 있나) → <b><code class="inl">describe</code></b>(왜 이 상태인가, Events) → <b><code class="inl">logs</code></b>(앱이 뭐라 하나).</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 사전 준비 ① 산출물 -->
+  <section class="slide t-autumn-a" aria-label="사전 준비 산출물">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">사전 준비 / 시작점</div>
+        <h2 class="head">week02~03 산출물을 <span class="accent">그대로 이어서</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">준비돼 있어야 할 것</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.3rem,0.9vh,0.6rem)">
+              <li><span class="mk">·</span><span><code class="inl">docpilot/</code> 프로젝트 (FastAPI 앱 + <code class="inl">Dockerfile</code>)</span></li>
+              <li><span class="mk">·</span><span><code class="inl">GET /</code> → <code class="inl">Hello, DocPilot</code>, <code class="inl">GET /health</code> → <code class="inl">ok</code></span></li>
+              <li><span class="mk">·</span><span>week03의 <code class="inl">/documents</code>, <code class="inl">db.py</code>, compose 구성</span></li>
+              <li><span class="mk">·</span><span>week02 이미지 (week03에서 <code class="inl">/documents</code> 추가됨)</span></li>
+            </ul>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">Dockerfile — week02→03 상태 (db.py 반영)</span></div>
+<pre><span class="tok-kw">FROM</span> <span class="tok-fl">python:3.12-slim</span>
+<span class="tok-kw">WORKDIR</span> <span class="tok-fl">/app</span>
+<span class="tok-kw">COPY</span> <span class="tok-fl">requirements.txt .</span>
+<span class="tok-kw">RUN</span> <span class="tok-fl">pip install --no-cache-dir -r requirements.txt</span>
+<span class="tok-kw">COPY</span> <span class="tok-fl">main.py .</span>
+<span class="tok-kw">COPY</span> <span class="tok-fl">db.py .</span>
+<span class="tok-kw">EXPOSE</span> <span class="tok-nm">8000</span>
+<span class="tok-kw">CMD</span> [<span class="tok-st">"uvicorn"</span>, <span class="tok-st">"main:app"</span>, <span class="tok-st">"--host"</span>, <span class="tok-st">"0.0.0.0"</span>, <span class="tok-st">"--port"</span>, <span class="tok-st">"8000"</span>]</pre>
+            </div>
+            <p class="note"><code class="inl">/health</code>는 <b>DB에 의존하지 않고</b> 항상 <code class="inl">ok</code>를 돌려준다(5주차 헬스체크의 토대). 모든 명령은 <b><code class="inl">docpilot/</code> 프로젝트 루트</b>에서 실행한다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 사전 준비 ② 도구 확인 -->
+  <section class="slide t-autumn-a" aria-label="도구 설치 확인">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">사전 준비 / 도구 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">docker</code> · <code class="inl" style="font-size:0.8em">kubectl</code> · <code class="inl" style="font-size:0.8em">kind</code> <span class="accent">버전 확인</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 세 도구 버전 확인</span></div>
+<pre><span class="tok-cmd">docker</span> version <span class="tok-fl">--format '{{.Server.Version}}'</span>
+   <span class="tok-cm"># Docker 데몬이 떠 있어야 함</span>
+<span class="tok-cmd">kubectl</span> version <span class="tok-fl">--client -o yaml</span> | <span class="tok-cmd">head</span> <span class="tok-fl">-5</span>
+   <span class="tok-cm"># 클라이언트 버전</span>
+<span class="tok-cmd">kind</span> version              <span class="tok-cm"># kind 버전</span></pre>
+          </div>
+          <div class="stack">
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">세 명령 모두 버전 문자열을 출력하면 통과. <code class="inl">command not found</code>가 나오면 설치가 필요하다.</p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — kind 설치 (Linux amd64)</span></div>
+<pre><span class="tok-cmd">curl</span> <span class="tok-fl">-Lo ./kind \</span>
+  <span class="tok-fl">https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64</span>
+<span class="tok-cmd">chmod</span> <span class="tok-fl">+x ./kind</span> &amp;&amp; <span class="tok-cmd">sudo</span> <span class="tok-fl">mv ./kind /usr/local/bin/kind</span></pre>
+            </div>
+            <p class="note">macOS/Windows는 실습환경 문서 참조. <code class="inl">kubectl</code>도 없으면 공식 릴리스에서 내려받아 <code class="inl">/usr/local/bin</code>에 둔다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 실습 로드맵 -->
+  <section class="slide t-autumn-a" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기</div>
+        <h2 class="head">목표: <span class="accent">docpilot을 kind 클러스터에 배포</span></h2>
+        <div class="grid grid-2" style="max-width:min(95vw,1080px)">
+          <div class="card"><span class="step-badge"><span class="num">1</span>1부 · 클러스터 준비</span><p class="lead" style="margin-top:0.5em"><code class="inl">k8s/</code> 디렉터리 → <code class="inl">kind-cluster.yaml</code> → <code class="inl">kind create cluster</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">2</span>2부 · 이미지 로드</span><p class="lead" style="margin-top:0.5em"><code class="inl">docker build</code> → <code class="inl">kind load docker-image</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">3</span>3부 · 배포·노출</span><p class="lead" style="margin-top:0.5em">postgres → Deployment → Service → <code class="inl">apply</code> → <code class="inl">port-forward</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">4</span>4부 · 확장·자가치유</span><p class="lead" style="margin-top:0.5em"><code class="inl">scale</code> replicas → Pod 삭제 → 자동 복구 관찰</p></div>
+        </div>
+        <p class="note">특히 <b>4단계 <code class="inl">kind load</code></b>를 빠뜨리면 뒤에서 <code class="inl">ImagePullBackOff</code>가 난다 — 절대 건너뛰지 말 것.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 1부 1단계 kind-cluster.yaml -->
+  <section class="slide t-autumn-b" aria-label="1단계 클러스터 설정 파일">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 1단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">k8s/</code> 디렉터리 + <span class="accent">클러스터 설정 파일</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/kind-cluster.yaml</span></div>
+<pre><span class="tok-kw">kind</span>: <span class="tok-fl">Cluster</span>
+<span class="tok-kw">apiVersion</span>: <span class="tok-fl">kind.x-k8s.io/v1alpha4</span>
+<span class="tok-kw">name</span>: <span class="tok-fl">docpilot</span>
+<span class="tok-kw">nodes</span>:
+  - <span class="tok-kw">role</span>: <span class="tok-fl">control-plane</span>
+    <span class="tok-kw">kubeadmConfigPatches</span>:
+      - |
+        <span class="tok-kw">kind</span>: InitConfiguration
+        <span class="tok-kw">nodeRegistration</span>:
+          <span class="tok-kw">kubeletExtraArgs</span>:
+            <span class="tok-kw">node-labels</span>: <span class="tok-st">"ingress-ready=true"</span>
+    <span class="tok-kw">extraPortMappings</span>:
+      - <span class="tok-kw">containerPort</span>: <span class="tok-nm">80</span>
+        <span class="tok-kw">hostPort</span>: <span class="tok-nm">80</span>
+        <span class="tok-kw">protocol</span>: <span class="tok-fl">TCP</span>
+      - <span class="tok-kw">containerPort</span>: <span class="tok-nm">443</span>
+        <span class="tok-kw">hostPort</span>: <span class="tok-nm">443</span>
+        <span class="tok-kw">protocol</span>: <span class="tok-fl">TCP</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash</span></div>
+<pre><span class="tok-cmd">mkdir</span> <span class="tok-fl">-p k8s</span></pre>
+            </div>
+            <p class="lead">노드 1개짜리 단순 클러스터지만, <b>5주차 Ingress에 대비해</b> 호스트 80/443 포트를 노드로 매핑하고 <code class="inl">ingress-ready</code> 라벨을 미리 붙인다.</p>
+            <p class="note">이 포트 매핑은 <b>클러스터 생성 시점에만</b> 지정할 수 있어 지금 넣어 둔다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 1부 2단계 클러스터 생성 + 기대출력 -->
+  <section class="slide t-autumn-b" aria-label="2단계 클러스터 생성">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">1부 · 2단계 · 실행 확인</div>
+        <h2 class="head">클러스터 생성 · <span class="accent">노드 Ready</span> 확인</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 클러스터 생성</span></div>
+<pre><span class="tok-cmd">kind</span> create cluster <span class="tok-fl">--config k8s/kind-cluster.yaml</span>
+
+<span class="tok-cmd">kubectl</span> cluster-info <span class="tok-fl">--context kind-docpilot</span>
+<span class="tok-cmd">kubectl</span> get nodes</pre>
+            </div>
+            <p class="note">마지막에 <code class="inl">Set kubectl context to "kind-docpilot"</code> 메시지가 보이면 성공. Pod가 아직 하나도 없어도 정상이다.</p>
+          </div>
+          <div class="callout">
+            <b style="color:var(--accent);font-size:var(--small-size)">기대 출력 — 노드가 Ready ✓</b>
+<pre style="font-family:var(--font-mono);font-size:var(--small-size);color:var(--ink);margin-top:0.5em;line-height:1.7;white-space:pre-wrap">NAME                     STATUS  ROLES
+docpilot-control-plane   <span style="color:var(--sage-deep)">Ready</span>   control-plane
+                         AGE  VERSION
+                         40s  v1.30.x</pre>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--micro-size)">시스템 컴포넌트는 <code class="inl">kubectl get pods -A</code>로 볼 수 있다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 2부 3단계 이미지 빌드 -->
+  <section class="slide t-autumn-b" aria-label="3단계 이미지 빌드">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">2부 · 3단계</div>
+        <h2 class="head">클러스터에 올릴 이미지 <span class="accent">빌드</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 현재(week03 상태) 코드를 0.3.0으로</span></div>
+<pre><span class="tok-cmd">docker</span> build <span class="tok-fl">-t docpilot:0.3.0 .</span>
+
+<span class="tok-cmd">docker</span> images <span class="tok-fl">docpilot</span>
+   <span class="tok-cm"># docpilot  0.3.0  ...  방금 만든 이미지</span></pre>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">왜 새 태그인가</b>
+              <p class="lead" style="margin-top:0.3em">week02에서 이미지를 <code class="inl">docpilot:0.2.0</code>으로 만들었고, week03에서 <code class="inl">/documents</code>가 추가됐다. 현재 코드 상태(앱 <code class="inl">version="0.3.0"</code>)에 맞춰 <b><code class="inl">docpilot:0.3.0</code></b> 새 태그로 빌드한다.</p>
+            </div>
+            <div class="warn">
+              <b style="color:var(--ink);font-size:var(--small-size)">기억할 차이</b>
+              <p class="lead" style="margin-top:0.3em;font-size:var(--small-size)">kind 클러스터는 로컬 Docker 저장소와 <b>분리된 별도 환경</b>이다. 빌드만 해선 클러스터가 이미지를 못 본다 → 다음 단계에서 <code class="inl">kind load</code>가 필요하다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. 2부 4단계 kind load (핵심 강조) -->
+  <section class="slide t-autumn-b" aria-label="4단계 kind load 이미지 주입">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">2부 · 4단계 · <span style="color:var(--coral-deep)">절대 누락 금지</span></div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">kind load</code>로 이미지를 <span class="accent">클러스터에 주입</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 로컬 이미지를 노드 안으로 복사</span></div>
+<pre><span class="tok-cmd">kind</span> load docker-image <span class="tok-fl">docpilot:0.3.0 \</span>
+  <span class="tok-fl">--name docpilot</span>
+<span class="tok-cm"># Image: "docpilot:0.3.0" ... loaded</span>
+
+<span class="tok-cmd">docker</span> exec <span class="tok-fl">-it docpilot-control-plane \</span>
+  <span class="tok-fl">crictl images</span> | <span class="tok-cmd">grep</span> <span class="tok-fl">docpilot</span></pre>
+            </div>
+          </div>
+          <div class="warn">
+            <b style="color:var(--ink);font-size:var(--h3-size)">이 단계를 빼먹으면?</b>
+            <p class="lead" style="margin-top:0.3em">뒤에서 <code class="inl">ImagePullBackOff</code>가 난다. K8s가 레지스트리에서 <code class="inl">docpilot:0.3.0</code>을 받아오려다 실패하기 때문이다. 그래서 Deployment에 <code class="inl">imagePullPolicy: IfNotPresent</code>를 명시해 "<b>로컬에 있으면 받아오지 마</b>"라고 지시할 것이다.</p>
+            <p class="lead" style="margin-top:0.4em;font-size:var(--small-size)"><b><code class="inl">postgres:16-alpine</code>는 공개 이미지</b>라 클러스터가 인터넷에서 자동으로 받아온다. <b>로컬 빌드 이미지(docpilot)만</b> <code class="inl">kind load</code>가 필요하다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 3부 5단계 postgres.yaml -->
+  <section class="slide t-autumn-b" aria-label="5단계 PostgreSQL 배포">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 5단계</div>
+        <h2 class="head">PostgreSQL 배포 — <span class="accent">docpilot의 의존 DB</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/postgres.yaml — Deployment (발췌)</span></div>
+<pre><span class="tok-kw">apiVersion</span>: <span class="tok-fl">apps/v1</span>
+<span class="tok-kw">kind</span>: <span class="tok-fl">Deployment</span>
+<span class="tok-kw">metadata</span>:
+  <span class="tok-kw">name</span>: <span class="tok-fl">docpilot-db</span>
+  <span class="tok-kw">labels</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot-db</span> }
+<span class="tok-kw">spec</span>:
+  <span class="tok-kw">replicas</span>: <span class="tok-nm">1</span>
+  <span class="tok-kw">selector</span>: { <span class="tok-kw">matchLabels</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot-db</span> } }
+  <span class="tok-kw">template</span>:
+    <span class="tok-kw">metadata</span>: { <span class="tok-kw">labels</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot-db</span> } }
+    <span class="tok-kw">spec</span>:
+      <span class="tok-kw">containers</span>:
+        - <span class="tok-kw">name</span>: <span class="tok-fl">postgres</span>
+          <span class="tok-kw">image</span>: <span class="tok-fl">postgres:16-alpine</span>
+          <span class="tok-kw">ports</span>: [{ <span class="tok-kw">containerPort</span>: <span class="tok-nm">5432</span> }]
+          <span class="tok-kw">env</span>:            <span class="tok-cm"># week05에서 Secret으로 분리</span>
+            - { <span class="tok-kw">name</span>: POSTGRES_USER,     <span class="tok-kw">value</span>: <span class="tok-st">"docpilot"</span> }
+            - { <span class="tok-kw">name</span>: POSTGRES_PASSWORD, <span class="tok-kw">value</span>: <span class="tok-st">"docpilot"</span> }
+            - { <span class="tok-kw">name</span>: POSTGRES_DB,       <span class="tok-kw">value</span>: <span class="tok-st">"docpilot"</span> }
+          <span class="tok-kw">volumeMounts</span>: [{ <span class="tok-kw">name</span>: data, <span class="tok-kw">mountPath</span>: /var/lib/postgresql/data }]
+      <span class="tok-kw">volumes</span>: [{ <span class="tok-kw">name</span>: data, <span class="tok-kw">emptyDir</span>: {} }]   <span class="tok-cm"># 실습용: Pod 소멸 시 소실</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/postgres.yaml — Service</span></div>
+<pre><span class="tok-kw">apiVersion</span>: <span class="tok-fl">v1</span>
+<span class="tok-kw">kind</span>: <span class="tok-fl">Service</span>
+<span class="tok-kw">metadata</span>: { <span class="tok-kw">name</span>: <span class="tok-fl">docpilot-db</span> }
+<span class="tok-kw">spec</span>:
+  <span class="tok-kw">selector</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot-db</span> }
+  <span class="tok-kw">ports</span>: [{ <span class="tok-kw">port</span>: <span class="tok-nm">5432</span>, <span class="tok-kw">targetPort</span>: <span class="tok-nm">5432</span> }]
+  <span class="tok-kw">type</span>: <span class="tok-fl">ClusterIP</span></pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash</span></div>
+<pre><span class="tok-cmd">kubectl</span> apply <span class="tok-fl">-f k8s/postgres.yaml</span>
+<span class="tok-cmd">kubectl</span> get pods <span class="tok-fl">-l app=docpilot-db</span>  <span class="tok-cm"># 1/1 Running 대기</span></pre>
+            </div>
+            <p class="note">Service 이름 <code class="inl">docpilot-db</code>가 곧 docpilot의 <b>접속 호스트명</b>이 된다(클러스터 내부 DNS).</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 3부 6단계 deployment.yaml -->
+  <section class="slide t-autumn-b" aria-label="6단계 docpilot Deployment">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 6단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">deployment.yaml</code> — docpilot <span class="accent">replicas=2</span></h2>
+        <div class="code" style="max-width:min(94vw,960px);align-self:center;width:100%">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/deployment.yaml</span></div>
+<pre><span class="tok-kw">apiVersion</span>: <span class="tok-fl">apps/v1</span>
+<span class="tok-kw">kind</span>: <span class="tok-fl">Deployment</span>
+<span class="tok-kw">metadata</span>: { <span class="tok-kw">name</span>: <span class="tok-fl">docpilot</span>, <span class="tok-kw">labels</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot</span> } }
+<span class="tok-kw">spec</span>:
+  <span class="tok-kw">replicas</span>: <span class="tok-nm">2</span>                 <span class="tok-cm"># Pod 2개를 항상 유지</span>
+  <span class="tok-kw">selector</span>: { <span class="tok-kw">matchLabels</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot</span> } }
+  <span class="tok-kw">template</span>:                   <span class="tok-cm"># 이 틀로 Pod를 찍어낸다</span>
+    <span class="tok-kw">metadata</span>: { <span class="tok-kw">labels</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot</span> } }   <span class="tok-cm"># Service가 이 라벨로 Pod를 찾음</span>
+    <span class="tok-kw">spec</span>:
+      <span class="tok-kw">containers</span>:
+        - <span class="tok-kw">name</span>: <span class="tok-fl">docpilot</span>
+          <span class="tok-kw">image</span>: <span class="tok-fl">docpilot:0.3.0</span>
+          <span class="tok-kw">imagePullPolicy</span>: <span class="tok-pt">IfNotPresent</span>   <span class="tok-cm"># 로컬 로드 이미지 사용(ImagePullBackOff 예방)</span>
+          <span class="tok-kw">ports</span>: [{ <span class="tok-kw">containerPort</span>: <span class="tok-nm">8000</span> }]
+          <span class="tok-kw">env</span>:            <span class="tok-cm"># 아직 하드코딩. week05에서 ConfigMap/Secret으로 외부화</span>
+            - { <span class="tok-kw">name</span>: APP_ENV, <span class="tok-kw">value</span>: <span class="tok-st">"k8s-dev"</span> }
+            - <span class="tok-kw">name</span>: DATABASE_URL   <span class="tok-cm"># 호스트는 Service명 docpilot-db</span>
+              <span class="tok-kw">value</span>: <span class="tok-st">"postgresql+psycopg://docpilot:docpilot@docpilot-db:5432/docpilot"</span></pre>
+        </div>
+        <p class="note">week03 compose의 <code class="inl">db</code> 대신 K8s <b>Service명 <code class="inl">docpilot-db</code></b>가 호스트다. psycopg 스킴은 week03과 동일하다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. 3부 7단계 service.yaml -->
+  <section class="slide t-autumn-b" aria-label="7단계 docpilot Service">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">3부 · 7단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">service.yaml</code> — Pod 앞의 <span class="accent">고정 접속 지점</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/service.yaml</span></div>
+<pre><span class="tok-kw">apiVersion</span>: <span class="tok-fl">v1</span>
+<span class="tok-kw">kind</span>: <span class="tok-fl">Service</span>
+<span class="tok-kw">metadata</span>: { <span class="tok-kw">name</span>: <span class="tok-fl">docpilot</span> }
+<span class="tok-kw">spec</span>:
+  <span class="tok-kw">selector</span>: { <span class="tok-kw">app</span>: <span class="tok-fl">docpilot</span> }   <span class="tok-cm"># 이 라벨 Pod로 트래픽 분산</span>
+  <span class="tok-kw">ports</span>:
+    - <span class="tok-kw">port</span>: <span class="tok-nm">80</span>              <span class="tok-cm"># Service가 노출하는 포트</span>
+      <span class="tok-kw">targetPort</span>: <span class="tok-nm">8000</span>      <span class="tok-cm"># 컨테이너(uvicorn) 포트</span>
+  <span class="tok-kw">type</span>: <span class="tok-fl">ClusterIP</span>           <span class="tok-cm"># 클러스터 내부 전용(기본)</span></pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">포트 매핑 읽기</b>
+              <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.3rem,0.9vh,0.6rem)">
+                <li><span class="mk">·</span><span><code class="inl">port: 80</code> — Service가 여는 문</span></li>
+                <li><span class="mk">·</span><span><code class="inl">targetPort: 8000</code> — 실제 컨테이너 포트</span></li>
+                <li><span class="mk">·</span><span><code class="inl">selector: app=docpilot</code> — 이 라벨 Pod에 부하 분산</span></li>
+              </ul>
+            </div>
+            <p class="note"><code class="inl">ClusterIP</code>는 클러스터 <b>내부 전용</b>이라 밖에서 바로 못 붙는다. 개발 중 확인엔 <code class="inl">port-forward</code>를 쓴다(10단계).</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 3부 8단계 apply + 상태확인 기대출력 -->
+  <section class="slide t-autumn-b" aria-label="8단계 적용과 상태 확인">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">3부 · 8단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">apply</code> · Pod 2개 <span class="accent">Running</span> 확인</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 적용 & 조망</span></div>
+<pre><span class="tok-cmd">kubectl</span> apply <span class="tok-fl">-f k8s/deployment.yaml</span>
+<span class="tok-cmd">kubectl</span> apply <span class="tok-fl">-f k8s/service.yaml</span>
+
+<span class="tok-cmd">kubectl</span> get pods <span class="tok-fl">-l app=docpilot -w</span>
+<span class="tok-cmd">kubectl</span> get <span class="tok-fl">deploy,rs,pods,svc -l app=docpilot</span></pre>
+            </div>
+            <p class="note">Deployment <code class="inl">READY 2/2</code>, ReplicaSet <code class="inl">DESIRED 2 / CURRENT 2</code>, Pod 2개 Running, Service <code class="inl">docpilot</code>가 보이면 배포 성공.</p>
+          </div>
+          <div class="callout">
+            <b style="color:var(--accent);font-size:var(--small-size)">기대 출력 — Pod 2개 Running ✓</b>
+<pre style="font-family:var(--font-mono);font-size:var(--small-size);color:var(--ink);margin-top:0.5em;line-height:1.7;white-space:pre-wrap">NAME                  READY  STATUS
+docpilot-6c9f-abcde   <span style="color:var(--sage-deep)">1/1</span>    <span style="color:var(--sage-deep)">Running</span>
+docpilot-6c9f-fghij   <span style="color:var(--sage-deep)">1/1</span>    <span style="color:var(--sage-deep)">Running</span>
+                      RESTARTS  AGE
+                      0         15s</pre>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--micro-size)"><code class="inl">-w</code>(watch)는 <code class="inl">Ctrl+C</code>로 종료.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 3부 9단계 describe/logs -->
+  <section class="slide t-autumn-b" aria-label="9단계 describe와 logs">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">3부 · 9단계 · 들여다보기</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">describe</code>와 <code class="inl" style="font-size:0.82em">logs</code>로 <span class="accent">내부 확인</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — Pod 이름을 변수에 담아 조회</span></div>
+<pre><span class="tok-fl">POD</span>=$(<span class="tok-cmd">kubectl</span> get pod <span class="tok-fl">-l app=docpilot \</span>
+  <span class="tok-fl">-o jsonpath='{.items[0].metadata.name}'</span>)
+
+<span class="tok-cmd">kubectl</span> describe pod <span class="tok-st">"$POD"</span>
+   <span class="tok-cm"># Events: Scheduled → Pulled → Created → Started</span>
+<span class="tok-cmd">kubectl</span> logs <span class="tok-st">"$POD"</span>
+   <span class="tok-cm"># uvicorn 시작 로그</span></pre>
+          </div>
+          <div class="callout">
+            <b style="color:var(--accent);font-size:var(--small-size)">정상 신호 ✓</b>
+            <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.3rem,0.9vh,0.6rem)">
+              <li><span class="mk">·</span><span><code class="inl">describe</code>의 Events에 오류가 없다</span></li>
+              <li><span class="mk">·</span><span><code class="inl">logs</code>에 <code class="inl">Uvicorn running on http://0.0.0.0:8000</code></span></li>
+            </ul>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--micro-size)">Events의 <b>Scheduled → Pulled → Created → Started</b> 흐름이 스케줄링·기동을 그대로 보여준다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 3부 10단계 port-forward + 기대출력 -->
+  <section class="slide t-autumn-b" aria-label="10단계 port-forward 접속 확인">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">3부 · 10단계 · 접속 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">port-forward</code>로 <span class="accent">전 과정 검증</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 로컬 8080 → Service 80 터널</span></div>
+<pre><span class="tok-cmd">kubectl</span> port-forward <span class="tok-fl">service/docpilot 8080:80</span>
+
+<span class="tok-cm"># 다른 터미널에서</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">-s http://localhost:8080/health</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">-s http://localhost:8080/</span>
+
+<span class="tok-fl">POD</span>=$(<span class="tok-cmd">kubectl</span> get pod <span class="tok-fl">-l app=docpilot \</span>
+  <span class="tok-fl">-o jsonpath='{.items[0].metadata.name}'</span>)
+<span class="tok-cmd">kubectl</span> exec <span class="tok-st">"$POD"</span> <span class="tok-fl">-- printenv APP_ENV</span></pre>
+            </div>
+          </div>
+          <div class="callout">
+            <b style="color:var(--accent);font-size:var(--small-size)">기대 응답 ✓</b>
+<pre style="font-family:var(--font-mono);font-size:var(--small-size);color:var(--ink);margin-top:0.5em;line-height:1.7;white-space:pre-wrap">/health → {<span style="color:var(--plum-deep)">"status"</span>:<span style="color:var(--sage-deep)">"ok"</span>}
+/      → {<span style="color:var(--plum-deep)">"message"</span>:
+          <span style="color:var(--sage-deep)">"Hello, DocPilot"</span>}
+APP_ENV → <span style="color:var(--sage-deep)">k8s-dev</span></pre>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--micro-size)">응답이 오면 이미지→클러스터→Deployment→Service→접속 전 과정이 성공한 것. 주입 설정(<code class="inl">APP_ENV</code>)은 week05에서 ConfigMap으로 외부화한다. 확인 후 <code class="inl">Ctrl+C</code>.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 4부 11단계 scale -->
+  <section class="slide t-autumn-b" aria-label="11단계 replica 스케일">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">4부 · 11단계 · 스케일</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">replicas</code>를 <span class="accent">늘리고 줄이기</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 명령형 스케일</span></div>
+<pre><span class="tok-cmd">kubectl</span> scale <span class="tok-fl">deployment/docpilot --replicas=4</span>
+<span class="tok-cmd">kubectl</span> get pods <span class="tok-fl">-l app=docpilot</span>   <span class="tok-cm"># 4개로 증가</span>
+
+<span class="tok-cmd">kubectl</span> scale <span class="tok-fl">deployment/docpilot --replicas=2</span>
+<span class="tok-cmd">kubectl</span> get pods <span class="tok-fl">-l app=docpilot</span>   <span class="tok-cm"># 2개로 감소</span>
+<span class="tok-cm"># 초과분이 Terminating</span></pre>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--ochre) 22%,var(--paper)),var(--paper))">
+            <b style="color:var(--accent)">선언형이 진실의 원천</b>
+            <p class="lead" style="margin-top:0.4em">방금은 명령형으로 조정했다. 선언형으로 하려면 <code class="inl">deployment.yaml</code>의 <code class="inl">replicas</code> 값을 고치고 다시 <code class="inl">kubectl apply</code>한다.</p>
+            <p class="lead" style="margin-top:0.4em;font-size:var(--small-size)">실무에선 <b>파일이 source of truth</b>여야 하므로 <b>파일을 고쳐 apply</b>하는 습관을 들이자.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 4부 12단계 자가치유 (하이라이트) -->
+  <section class="slide t-autumn-b" aria-label="12단계 Pod 삭제와 자가치유">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">4부 · 12단계 · <span style="color:var(--plum-deep)">이번 주 하이라이트</span></div>
+        <h2 class="head">Pod를 지워도 <span class="accent">스스로 살아난다</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 감시 창(별도 터미널)</span></div>
+<pre><span class="tok-cmd">kubectl</span> get pods <span class="tok-fl">-l app=docpilot -w</span></pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 다른 터미널에서 Pod 삭제</span></div>
+<pre><span class="tok-fl">POD</span>=$(<span class="tok-cmd">kubectl</span> get pod <span class="tok-fl">-l app=docpilot \</span>
+  <span class="tok-fl">-o jsonpath='{.items[0].metadata.name}'</span>)
+<span class="tok-cmd">kubectl</span> delete pod <span class="tok-st">"$POD"</span></pre>
+            </div>
+          </div>
+          <div class="callout">
+            <b style="color:var(--accent);font-size:var(--small-size)">감시 창에서 보이는 것 ✓</b>
+<pre style="font-family:var(--font-mono);font-size:var(--small-size);color:var(--ink);margin-top:0.5em;line-height:1.7;white-space:pre-wrap">docpilot-...-abcde  <span style="color:var(--coral-deep)">Terminating</span>
+docpilot-...-klmno  <span style="color:var(--ochre)">ContainerCreating</span>
+docpilot-...-klmno  <span style="color:var(--sage-deep)">Running</span></pre>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">지운 Pod가 <code class="inl">Terminating</code> 되는 동시에 <b>새 Pod가 곧바로 생성</b>된다. 잠시 뒤에도 항상 2개. 이것이 "desired state = 2개"를 K8s가 지켜주는 <b>자가치유</b>다.</p>
+          </div>
+        </div>
+        <p class="note"><b>(선택) 무중단 감 잡기</b>: <code class="inl">port-forward</code>를 켜고 반복 <code class="inl">curl</code> 중 Pod를 지우면 대부분 <code class="inl">200</code>. 간헐적 실패는 아직 <b>readiness probe가 없어서</b>다 — week05에서 probe로 해결한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. 트러블슈팅 -->
+  <section class="slide t-autumn-b" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">증상 · 원인 · <span class="accent">해결</span></h2>
+        <div class="card" style="max-width:min(96vw,1160px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:28%">증상</th><th style="width:30%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td><code>ImagePullBackOff</code> / <code>ErrImagePull</code></td><td><code>kind load</code> 누락, 태그 오타, <code>:latest</code></td><td><code>kind load docker-image docpilot:0.3.0 --name docpilot</code> 재실행 · <code>imagePullPolicy: IfNotPresent</code></td></tr>
+              <tr><td><code>CrashLoopBackOff</code></td><td>시작 직후 죽음(코드·CMD·import 오류)</td><td><code>kubectl logs &lt;pod&gt; --previous</code>로 직전 로그 확인 후 재빌드·재로드</td></tr>
+              <tr><td>Pod가 계속 <code>Pending</code></td><td>스케줄 불가(리소스 부족 등)</td><td><code>describe pod</code>의 Events, <code>get nodes</code>가 Ready인지</td></tr>
+              <tr><td><code>kubectl connection refused</code></td><td>컨텍스트가 클러스터를 안 가리킴</td><td><code>kubectl config use-context kind-docpilot</code></td></tr>
+              <tr><td><code>curl localhost:8080</code> 무응답</td><td>port-forward 죽음/대상 미준비</td><td>port-forward 터미널 생존·<code>get pods</code> Running 확인</td></tr>
+              <tr><td><code>kind create</code> 80 포트 에러</td><td>호스트 80/443 점유</td><td>점유 종료, 또는 <code>hostPort</code>를 8080/8443으로 변경</td></tr>
+              <tr><td><code>/documents</code>가 500</td><td>DB Pod 미준비 / DATABASE_URL 오타</td><td><code>get pods -l app=docpilot-db</code> Running·호스트가 <code>docpilot-db</code>인지 확인</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 23. 과제 + 체크리스트 -->
+  <section class="slide t-autumn-b" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / 이번 주 제출물</div>
+        <h2 class="head">이번 주 <span class="accent">과제</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">제출물 (week04/ 폴더 · 스크린샷/로그)</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.28rem,0.85vh,0.6rem)">
+              <li><span class="mk">1</span><span><code class="inl">get deploy,rs,pods,svc -l app=docpilot</code> — 2/2, Pod 2개 Running</span></li>
+              <li><span class="mk">2</span><span><code class="inl">describe pod</code>의 Events 섹션 — 정상 기동 흐름</span></li>
+              <li><span class="mk">3</span><span><code class="inl">curl .../health</code>, <code class="inl">curl .../</code> 결과</span></li>
+              <li><span class="mk">4</span><span><b>자가치유 증빙</b>: Pod 삭제 직후 <code class="inl">get pods -w</code> 화면</span></li>
+              <li><span class="mk">5</span><span><code class="inl">deployment · service · postgres · kind-cluster</code> yaml 4종</span></li>
+              <li><span class="mk">6</span><span>회고 3~5줄: "Compose 대비 K8s에서 새로 얻은 것"</span></li>
+            </ul>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.26rem,0.8vh,0.55rem)">
+              <li><span class="mk">✓</span><span><code class="inl">kind</code>로 클러스터 생성 · <code class="inl">get nodes</code> Ready</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">docker build</code> 0.3.0 · <code class="inl">kind load</code> 주입</span></li>
+              <li><span class="mk">✓</span><span>Deployment + Service <code class="inl">apply</code></span></li>
+              <li><span class="mk">✓</span><span><code class="inl">get / describe / logs</code>로 상태 조회</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">port-forward</code>로 <code class="inl">/health</code>·<code class="inl">/</code> 확인</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">replicas</code> 증감 · Pod 삭제 → 자가치유 관찰</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">imagePullPolicy: IfNotPresent</code>가 왜 필요한지 설명</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 24. 다음 주 예고 -->
+  <section class="slide t-autumn-b" aria-label="다음 주 예고">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Next · Week 05 · Block 1 미니 과제</div>
+        <h2 class="head" style="font-size:var(--title-size)">다음 주 —<br/><span class="accent">쿠버네티스 심화와 운영형 배포</span></h2>
+        <p class="hero-line" style="max-width:62ch">이번 주 배포는 <b style="color:var(--ink)">설정이 YAML에 하드코딩</b>돼 있고, 새 Pod로 트래픽이 성급히 흘러 <b style="color:var(--ink)">간헐적 실패</b>가 났다. 이것을 운영형 배포로 끌어올린다.</p>
+        <div class="hero-evo" style="gap:0.6em">
+          <span class="chip">ConfigMap/Secret으로 설정·자격증명 외부화</span>
+          <span class="chip">liveness/readiness <code class="inl" style="background:none;color:var(--teal)">probe</code></span>
+          <span class="chip">resources + HPA 오토스케일링</span>
+          <span class="chip">Ingress · <code class="inl" style="background:none;color:var(--teal)">rollout</code> 롤백 · CI/CD</span>
+        </div>
+        <p class="note">이번 주 산출물(클러스터·매니페스트)을 그대로 이어서 쓴다.</p>
+        <div class="hero-evo" style="margin-top:0.4em">
+          <span class="chip" style="border-color:var(--terracotta-deep)">W04 Kubernetes 기초</span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--plum) 25%,var(--paper))">W05 운영형 배포</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
