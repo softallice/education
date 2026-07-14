@@ -1,0 +1,1285 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 03 — Docker Compose 멀티 컨테이너</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01 · week02 덱과 동일한 디자인 시스템 계승
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* Compose 서비스 관계도 (web ↔ db + volume) */
+.composeviz { display: grid; grid-template-columns: 1fr auto 1fr; gap: clamp(0.5rem, 1.4vw, 1.2rem); align-items: center; }
+.svc {
+  border-radius: 14px; padding: clamp(0.6rem, 1.3vw, 1.1rem);
+  background: var(--paper); border: 1px solid rgba(120,78,46,0.12);
+  box-shadow: var(--shadow-soft); text-align: center;
+}
+.svc .svc-name { font-family: var(--font-mono); font-weight: 800; font-size: var(--h3-size); color: var(--ink); }
+.svc .svc-sub { font-size: var(--micro-size); color: var(--ink-soft); margin-top: 0.2em; line-height: 1.35; }
+.svc.web { background: color-mix(in srgb, var(--coral) 26%, var(--paper)); }
+.svc.db  { background: color-mix(in srgb, var(--teal) 30%, var(--paper)); }
+.svc-link { display: flex; flex-direction: column; align-items: center; gap: 0.25em; font-size: var(--micro-size); color: var(--accent); font-weight: 700; font-family: var(--font-mono); }
+.svc-link .big { font-size: 1.6em; line-height: 1; }
+.vol-tag {
+  margin-top: clamp(0.4rem, 1vw, 0.8rem); align-self: center; grid-column: 3;
+  display: inline-flex; align-items: center; gap: 0.4em; justify-self: center;
+  font-size: var(--micro-size); font-weight: 700; color: var(--sage-deep);
+  background: color-mix(in srgb, var(--sage) 25%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--sage-deep) 35%, transparent);
+  border-radius: 999px; padding: 0.35em 0.8em; font-family: var(--font-mono);
+}
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3, .composeviz { grid-template-columns: 1fr; }
+  .composeviz .svc-link { flex-direction: row; }
+  .vol-tag { grid-column: auto; }
+  .nav-dots { display: none; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 03</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">22</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-summer-a" aria-label="타이틀">
+    <svg class="motif motif--sun float-motif" style="--mo:0.55" viewBox="0 0 200 200" fill="none" aria-hidden="true">
+      <circle cx="100" cy="100" r="46" fill="currentColor"/>
+      <g stroke="currentColor" stroke-width="7" stroke-linecap="round">
+        <line x1="100" y1="12" x2="100" y2="40"/><line x1="100" y1="160" x2="100" y2="188"/>
+        <line x1="12" y1="100" x2="40" y2="100"/><line x1="160" y1="100" x2="188" y2="100"/>
+        <line x1="38" y1="38" x2="58" y2="58"/><line x1="142" y1="142" x2="162" y2="162"/>
+        <line x1="162" y1="38" x2="142" y2="58"/><line x1="58" y1="142" x2="38" y2="162"/>
+      </g>
+    </svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · Block 1</span>
+      <div class="eyebrow">Week 03 — Docker Compose 멀티 컨테이너</div>
+      <h1 class="title">단일 컨테이너 →<br/><span style="color:var(--accent)">web + DB 멀티 컨테이너</span></h1>
+      <p class="hero-line">앱 혼자서는 서비스가 안 된다. <b style="color:var(--ink)">docpilot</b>(web)과 PostgreSQL을 Compose로 함께 띄우고, 문서 메타데이터를 DB에 저장한다.</p>
+      <div class="hero-evo">
+        <span class="chip">지난주 단일 컨테이너 <code class="inl" style="background:none;color:var(--teal)">docpilot:0.2.0</code></span>
+        <span class="arrow">→</span>
+        <span class="chip">web + PostgreSQL 16 + <code class="inl" style="background:none;color:var(--teal)">/documents</code></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-summer-a" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.35" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:70ch">
+          <li><span class="mk">1</span><span>컨테이너 <b>네트워크</b>로 서비스끼리 <b>이름으로 통신</b>하는 원리를 이해한다.</span></li>
+          <li><span class="mk">2</span><span><b>볼륨</b>으로 데이터를 컨테이너 수명과 분리해 <b>영속화</b>한다.</span></li>
+          <li><span class="mk">3</span><span><b>환경변수</b>로 설정을 주입하고(12-Factor #3 Config), <b>시크릿</b>을 코드에 넣지 않는다.</span></li>
+          <li><span class="mk">4</span><span><code class="inl">docker-compose.yml</code>로 <b>web + PostgreSQL 16</b>을 한 번에 띄운다.</span></li>
+          <li><span class="mk">5</span><span><code class="inl">/documents</code> 엔드포인트를 추가해 업로드 메타를 <b>DB에 저장·조회</b>한다.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 ① docker-compose란 -->
+  <section class="slide t-summer-a" aria-label="docker compose란">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ① / 왜 Compose인가</div>
+        <h2 class="head">여러 컨테이너를 <span class="accent">한 파일 · 한 명령</span>으로</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <p class="lead"><code class="inl">docker run</code>을 서비스마다 손으로 치면 포트·네트워크·환경변수·순서를 매번 챙겨야 한다. <b>Compose</b>는 이 전부를 하나의 YAML로 선언하고 <code class="inl">docker compose up</code> 한 번에 띄운다.</p>
+            <div class="card">
+              <b style="color:var(--accent)">한 파일에 선언하는 것</b>
+              <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.3rem,0.9vh,0.6rem)">
+                <li><span class="mk">·</span><span><b>services</b> — 띄울 컨테이너(web, db)</span></li>
+                <li><span class="mk">·</span><span><b>networks</b> — 서비스끼리 통신하는 가상 네트워크</span></li>
+                <li><span class="mk">·</span><span><b>volumes</b> — 데이터를 영속화하는 저장소</span></li>
+              </ul>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">v2 vs v1 — 반드시 v2</b>
+              <p class="lead" style="margin-top:0.3em;font-size:var(--small-size)"><code class="inl">docker compose</code>(공백)가 Compose <b>v2</b>다. 옛 <code class="inl">docker-compose</code>(하이픈)는 v1이니 가급적 v2를 쓴다.</p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 버전 확인</span></div>
+<pre><span class="tok-cmd">docker</span> compose <span class="tok-fl">version</span>   <span class="tok-cm"># Docker Compose version v2.x</span></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ② 서비스·네트워크·볼륨 (관계도) -->
+  <section class="slide t-summer-b" aria-label="서비스 네트워크 볼륨 관계도">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ② / 네트워크 · 볼륨</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">web</code>은 <span class="accent">이름</span>으로 <code class="inl" style="font-size:0.8em">db</code>에 붙는다</h2>
+        <div class="composeviz" style="max-width:min(94vw,960px);align-self:center;width:100%">
+          <div class="svc web">
+            <div class="svc-name">web</div>
+            <div class="svc-sub">docpilot (FastAPI)<br/>build: . · 포트 8000</div>
+          </div>
+          <div class="svc-link">
+            <span class="big">→</span>
+            <span>db:5432</span>
+            <span style="color:var(--ink-faint);font-weight:600">서비스 이름 = 호스트명</span>
+          </div>
+          <div class="svc db">
+            <div class="svc-name">db</div>
+            <div class="svc-sub">postgres:16<br/>내부 포트 5432</div>
+          </div>
+          <span class="vol-tag">🗄 named volume · pgdata → /var/lib/postgresql/data</span>
+        </div>
+        <p class="note"><b>네트워크</b>: Compose가 프로젝트별 가상 네트워크를 자동 생성 → web은 IP가 아니라 <code class="inl">db</code>라는 이름으로 접속한다(컨테이너 IP는 재시작마다 바뀌지만 이름은 안정적 = DNS 역할, 12-Factor "Backing services"). &nbsp;<b>볼륨</b>: 컨테이너는 일회용이라 지우면 데이터도 사라진다 → <code class="inl">pgdata</code> 명명 볼륨에 담아 수명과 분리한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ③ healthcheck + depends_on -->
+  <section class="slide t-summer-b" aria-label="healthcheck depends_on 기동순서">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ③ / 기동 순서 (흔한 함정)</div>
+        <h2 class="head">DB가 <span class="accent">준비된 뒤</span> web을 띄운다</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--mint) 30%,var(--paper)),var(--paper))">
+            <span class="pill">순서를 안 맞추면</span>
+            <p class="lead" style="margin-top:0.5em">web이 DB보다 <b>먼저 떠서</b> 접속 에러(<code class="inl">connection refused</code>)가 난다. 앱 시작 시 <code class="inl">init_db()</code>가 테이블을 만드는데, 이때 DB가 아직 안 떠 있으면 그대로 죽는다.</p>
+          </div>
+          <div class="stack">
+            <p class="lead"><b>해법</b>: db에 <code class="inl">healthcheck</code>로 "진짜 접속 가능한 상태"를 확인하고, web은 <code class="inl">depends_on: condition: service_healthy</code>로 그때까지 기다린다.</p>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">기동 순서</span></div>
+<pre><span class="tok-cm"># db가 healthy 될 때까지</span>
+<span class="tok-nm">db</span>  <span class="tok-op">──▶</span> pg_isready <span class="tok-st">OK</span>
+<span class="tok-nm">web</span> <span class="tok-op">──▶</span> 그 다음에 시작</pre>
+            </div>
+          </div>
+        </div>
+        <p class="note"><code class="inl">depends_on: condition: service_healthy</code> + <code class="inl">healthcheck</code>가 핵심이다. 이게 없으면 web이 DB보다 먼저 떠서 접속 에러가 난다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ④ 환경변수 & 시크릿 -->
+  <section class="slide t-mid-a" aria-label="환경변수와 시크릿 기초">
+    <svg class="motif motif--wave float-motif" style="--mo:0.3" viewBox="0 0 1440 200" preserveAspectRatio="none" aria-hidden="true"><path fill="currentColor" d="M0 120 C240 60 480 180 720 120 C960 60 1200 180 1440 120 L1440 200 L0 200 Z"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ④ / Config & Secret</div>
+        <h2 class="head">설정은 <span class="accent">환경에서</span>, 비밀번호는 <span class="accent">코드 밖에서</span></h2>
+        <div class="grid grid-2" style="max-width:min(94vw,1020px)">
+          <div class="card"><b style="color:var(--accent)">환경변수 (Config)</b><p class="lead" style="margin-top:0.3em">접속 주소·포트·DB 이름처럼 환경마다 달라지는 값. 코드가 아니라 환경에서 주입한다. docpilot은 <code class="inl">DATABASE_URL</code> 하나로 DB 접속 정보를 받는다. <b>12-Factor #3 Config.</b></p></div>
+          <div class="card"><b style="color:var(--accent)">시크릿 (Secret)</b><p class="lead" style="margin-top:0.3em">비밀번호·API 키처럼 유출되면 안 되는 값. <b>절대 코드/이미지에 하드코딩하지 않는다.</b> 이번 주는 <code class="inl">.env</code>로 분리하고 <code class="inl">.gitignore</code>로 커밋을 막는다.</p></div>
+        </div>
+        <div class="warn">
+          <b style="color:var(--ink);font-size:var(--h3-size)">철칙</b>
+          <p class="lead" style="margin-top:0.3em">비밀번호를 소스에 적지 않는다. <code class="inl">.env</code>는 절대 커밋하지 않는다. 이 두 가지는 이번 주부터 <b>습관으로 굳힌다.</b> (운영에서는 Docker/K8s secret이나 Vault를 쓴다 — 5주차 확장.)</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 사전 준비 -->
+  <section class="slide t-mid-a" aria-label="사전 준비">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">사전 준비 / 시작점</div>
+        <h2 class="head">시작 전 <span class="accent">체크</span></h2>
+        <p class="lead">지난주 산출물: <b>컨테이너화된 docpilot</b> (<code class="inl">Dockerfile</code>, <code class="inl">.dockerignore</code>, <code class="inl">main.py</code>, <code class="inl">requirements.txt</code>)</p>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">필요한 도구</b>
+            <ul class="checklist" style="margin-top:0.6em">
+              <li><span class="mk">✓</span><span>Docker + <b>Docker Compose v2</b></span></li>
+              <li><span class="mk">✓</span><span>week02의 docpilot 프로젝트 폴더</span></li>
+            </ul>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 확인 명령</span></div>
+<pre><span class="tok-cmd">docker</span> compose <span class="tok-fl">version</span>     <span class="tok-cm"># Docker Compose version v2.x</span>
+<span class="tok-cmd">cd</span> <span class="tok-fl">~/projects/docpilot</span>
+<span class="tok-cmd">ls</span>                         <span class="tok-cm"># Dockerfile, main.py, requirements.txt 확인</span></pre>
+            </div>
+            <p class="note">위 세 파일이 보이면 준비 완료. week02의 컨테이너화된 docpilot을 그대로 이어서 확장한다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 실습 로드맵 -->
+  <section class="slide t-mid-b" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기</div>
+        <h2 class="head">목표 산출물: <span class="accent">web + PostgreSQL 스택 + 영속 데이터</span></h2>
+        <div class="grid grid-3" style="max-width:min(94vw,1060px)">
+          <div class="card"><span class="step-badge"><span class="num">1</span>1부 · DB 연동 코드</span><p class="lead" style="margin-top:0.5em">requirements → <code class="inl">db.py</code> → <b>Dockerfile</b> → <code class="inl">main.py</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">2</span>2부 · Compose 기동</span><p class="lead" style="margin-top:0.5em"><code class="inl">.env</code> → <code class="inl">docker-compose.yml</code> → <code class="inl">up --build</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">3</span>3부 · 확인 & 영속화</span><p class="lead" style="margin-top:0.5em"><code class="inl">/documents</code> → psql → <b>볼륨 검증</b></p></div>
+        </div>
+        <p class="note">아래 9단계를 순서대로 따라 친다. 특히 <b>Dockerfile에 <code class="inl">db.py</code> 복사 추가</b>(3단계)를 빠뜨리면 스택이 <code class="inl">ModuleNotFoundError</code>로 죽는다 — 절대 건너뛰지 말 것.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 1단계 requirements.txt -->
+  <section class="slide t-mid-b" aria-label="1단계 의존성 추가">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">1부 · 1단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">requirements.txt</code>에 <span class="accent">SQLAlchemy · psycopg</span> 추가</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">requirements.txt — 전체 교체</span></div>
+<pre><span class="tok-fl">fastapi</span>==<span class="tok-nm">0.115.6</span>
+<span class="tok-fl">uvicorn[standard]</span>==<span class="tok-nm">0.32.1</span>
+<span class="tok-fl">sqlalchemy</span>==<span class="tok-nm">2.0.36</span>
+<span class="tok-fl">psycopg[binary]</span>==<span class="tok-nm">3.2.3</span>
+<span class="tok-fl">pydantic</span>==<span class="tok-nm">2.10.4</span></pre>
+          </div>
+          <div class="stack">
+            <p class="lead"><code class="inl">sqlalchemy</code>는 ORM, <code class="inl">psycopg[binary]</code>는 PostgreSQL 드라이버(psycopg 3)다.</p>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인 (로컬 가상환경에서 선택적)</b>
+              <div class="code" style="margin-top:0.5em">
+                <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash</span></div>
+<pre><span class="tok-cmd">source</span> <span class="tok-fl">.venv/bin/activate</span>
+<span class="tok-cmd">pip install</span> <span class="tok-fl">-r requirements.txt</span>
+<span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"import sqlalchemy, psycopg, pydantic; print('ok')"</span>  <span class="tok-cm"># ok</span></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 2단계 db.py -->
+  <section class="slide t-autumn-a" aria-label="2단계 db.py 작성">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 2단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">db.py</code> — DB 연결 + <span class="accent">Document 모델</span></h2>
+        <div class="code" style="max-width:min(94vw,980px);align-self:center;width:100%">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">db.py — docpilot week03</span></div>
+<pre><span class="tok-kw">import</span> <span class="tok-fl">os</span>
+<span class="tok-kw">from</span> <span class="tok-fl">sqlalchemy</span> <span class="tok-kw">import</span> Column, DateTime, Integer, String, create_engine, func
+<span class="tok-kw">from</span> <span class="tok-fl">sqlalchemy.orm</span> <span class="tok-kw">import</span> DeclarativeBase, sessionmaker
+
+<span class="tok-cm"># 접속 정보는 코드가 아니라 환경변수에서. 로컬 폴백은 개발 편의용.</span>
+<span class="tok-fl">DATABASE_URL</span> = os.getenv(
+    <span class="tok-st">"DATABASE_URL"</span>,
+    <span class="tok-st">"postgresql+psycopg://docpilot:docpilot@localhost:5432/docpilot"</span>,
+)
+
+<span class="tok-cm"># pool_pre_ping: 죽은 커넥션을 미리 걸러 재연결 (컨테이너 재시작 대비)</span>
+<span class="tok-fl">engine</span> = <span class="tok-fn">create_engine</span>(DATABASE_URL, pool_pre_ping=<span class="tok-nm">True</span>)
+<span class="tok-fl">SessionLocal</span> = <span class="tok-fn">sessionmaker</span>(bind=engine, autoflush=<span class="tok-nm">False</span>, autocommit=<span class="tok-nm">False</span>)
+
+<span class="tok-kw">class</span> <span class="tok-fn">Base</span>(DeclarativeBase):
+    <span class="tok-kw">pass</span>
+
+<span class="tok-kw">class</span> <span class="tok-fn">Document</span>(Base):
+    <span class="tok-st">"""업로드된 문서의 메타데이터. 실제 파일 내용이 아니라 '정보'만 저장한다."""</span>
+    <span class="tok-fl">__tablename__</span> = <span class="tok-st">"documents"</span>
+    <span class="tok-fl">id</span> = <span class="tok-fn">Column</span>(Integer, primary_key=<span class="tok-nm">True</span>, index=<span class="tok-nm">True</span>)
+    <span class="tok-fl">filename</span> = <span class="tok-fn">Column</span>(String(<span class="tok-nm">255</span>), nullable=<span class="tok-nm">False</span>)
+    <span class="tok-fl">content_type</span> = <span class="tok-fn">Column</span>(String(<span class="tok-nm">100</span>), nullable=<span class="tok-nm">False</span>)
+    <span class="tok-fl">size_bytes</span> = <span class="tok-fn">Column</span>(Integer, nullable=<span class="tok-nm">False</span>)
+    <span class="tok-fl">created_at</span> = <span class="tok-fn">Column</span>(DateTime(timezone=<span class="tok-nm">True</span>), server_default=func.now())
+
+<span class="tok-kw">def</span> <span class="tok-fn">init_db</span>() -> <span class="tok-nm">None</span>:
+    <span class="tok-st">"""앱 시작 시 테이블이 없으면 생성. (학습용으로 간단히.)"""</span>
+    Base.metadata.<span class="tok-fn">create_all</span>(bind=engine)</pre>
+        </div>
+        <p class="note"><code class="inl">postgresql+psycopg://</code> 스킴이 psycopg 3 드라이버를 지정한다. <code class="inl">사용자:비밀번호@호스트:포트/DB이름</code> 순서다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 3단계 Dockerfile COPY db.py (필수 강조) -->
+  <section class="slide t-autumn-a" aria-label="3단계 Dockerfile에 db.py 복사 추가">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">1부 · 3단계 · <span style="color:var(--coral-deep)">절대 누락 금지</span></div>
+        <h2 class="head">Dockerfile에 <code class="inl" style="font-size:0.82em">COPY db.py .</code> <span class="accent">한 줄 추가</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">Dockerfile — week02 파일에서 아래 한 줄 추가</span></div>
+<pre><span class="tok-cm"># ... (week02 내용 그대로) ...</span>
+<span class="tok-kw">COPY</span> <span class="tok-fl">main.py .</span>
+<span class="tok-kw">COPY</span> <span class="tok-fl">db.py .</span>        <span class="tok-pt"># ← week03에서 추가</span></pre>
+          </div>
+          <div class="stack">
+            <div class="warn">
+              <b style="color:var(--ink);font-size:var(--h3-size)">왜 필수인가?</b>
+              <p class="lead" style="margin-top:0.3em">week02 Dockerfile엔 <code class="inl">COPY main.py .</code>만 있다. 방금 <code class="inl">db.py</code>가 새로 생겼으니 <b>이미지에도 복사</b>해야 한다. 빠뜨리면 <code class="inl">docker compose up --build</code> 시 이미지에 <code class="inl">db.py</code>가 없어 컨테이너가 <code class="inl">ModuleNotFoundError: No module named 'db'</code>로 즉시 죽는다 (<code class="inl">web-1</code> CrashLoop).</p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 확인</span></div>
+<pre><span class="tok-cmd">grep</span> <span class="tok-fl">db.py Dockerfile</span>   <span class="tok-cm"># 줄이 나오면 OK</span></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 4단계 main.py /documents 코드 -->
+  <section class="slide t-autumn-a" aria-label="4단계 main.py 확장 코드">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 4단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">main.py</code> 확장 — <span class="accent">/documents 저장·조회</span></h2>
+        <div class="code" style="max-width:min(95vw,1000px);align-self:center;width:100%">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">main.py — docpilot week03 (핵심 발췌)</span></div>
+<pre><span class="tok-kw">from</span> <span class="tok-fl">fastapi</span> <span class="tok-kw">import</span> Depends, FastAPI, File, HTTPException, UploadFile
+<span class="tok-kw">from</span> <span class="tok-fl">sqlalchemy</span> <span class="tok-kw">import</span> select
+<span class="tok-kw">from</span> <span class="tok-fl">sqlalchemy.orm</span> <span class="tok-kw">import</span> Session
+<span class="tok-kw">from</span> <span class="tok-fl">db</span> <span class="tok-kw">import</span> Document, SessionLocal, init_db
+
+<span class="tok-fl">app</span> = <span class="tok-fn">FastAPI</span>(title=<span class="tok-st">"docpilot"</span>, version=<span class="tok-st">"0.3.0"</span>)
+
+<span class="tok-pt">@app.on_event(<span class="tok-st">"startup"</span>)</span>
+<span class="tok-kw">def</span> <span class="tok-fn">on_startup</span>() -> <span class="tok-nm">None</span>:
+    <span class="tok-fn">init_db</span>()   <span class="tok-cm"># healthcheck+depends_on으로 db 준비 후 실행됨</span>
+
+<span class="tok-kw">def</span> <span class="tok-fn">get_db</span>():
+    <span class="tok-st">"""요청마다 세션을 열고 끝나면 닫는다(의존성 주입)."""</span>
+    <span class="tok-fl">db</span> = <span class="tok-fn">SessionLocal</span>()
+    <span class="tok-kw">try</span>:
+        <span class="tok-kw">yield</span> db
+    <span class="tok-kw">finally</span>:
+        db.<span class="tok-fn">close</span>()
+
+<span class="tok-pt">@app.post(<span class="tok-st">"/documents"</span>, response_model=DocumentOut, status_code=<span class="tok-nm">201</span>)</span>
+<span class="tok-kw">async def</span> <span class="tok-fn">upload_document</span>(file: UploadFile = <span class="tok-fn">File</span>(...), db: Session = <span class="tok-fn">Depends</span>(get_db)):
+    <span class="tok-fl">body</span> = <span class="tok-kw">await</span> file.<span class="tok-fn">read</span>()   <span class="tok-cm"># 크기 계산용으로만 읽는다</span>
+    <span class="tok-fl">doc</span> = <span class="tok-fn">Document</span>(filename=file.filename <span class="tok-kw">or</span> <span class="tok-st">"unnamed"</span>,
+                   content_type=file.content_type <span class="tok-kw">or</span> <span class="tok-st">"application/octet-stream"</span>,
+                   size_bytes=<span class="tok-fn">len</span>(body))
+    db.<span class="tok-fn">add</span>(doc); db.<span class="tok-fn">commit</span>(); db.<span class="tok-fn">refresh</span>(doc)
+    <span class="tok-kw">return</span> doc</pre>
+        </div>
+        <p class="note">1주차의 <code class="inl">/</code>·<code class="inl">/health</code>는 그대로 두고, 문서 메타 <b>업로드·목록·단건 조회</b>를 추가한다(다음 슬라이드). 파일 내용이 아니라 <b>메타데이터만</b> 저장한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. main.py 조회 엔드포인트 해설 -->
+  <section class="slide t-autumn-a" aria-label="main.py 조회 엔드포인트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">1부 · 4단계 · 조회 엔드포인트</div>
+        <h2 class="head">목록 · 단건 · <span class="accent">응답 스키마</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">main.py — 조회 & 스키마</span></div>
+<pre><span class="tok-kw">class</span> <span class="tok-fn">DocumentOut</span>(BaseModel):
+    id: <span class="tok-nm">int</span>; filename: <span class="tok-nm">str</span>
+    content_type: <span class="tok-nm">str</span>; size_bytes: <span class="tok-nm">int</span>
+    created_at: datetime
+    <span class="tok-kw">class</span> <span class="tok-fn">Config</span>:
+        <span class="tok-fl">from_attributes</span> = <span class="tok-nm">True</span>  <span class="tok-cm"># ORM→응답 변환</span>
+
+<span class="tok-pt">@app.get(<span class="tok-st">"/documents"</span>, response_model=<span class="tok-nm">list</span>[DocumentOut])</span>
+<span class="tok-kw">def</span> <span class="tok-fn">list_documents</span>(db: Session = <span class="tok-fn">Depends</span>(get_db)):
+    <span class="tok-kw">return</span> <span class="tok-nm">list</span>(db.<span class="tok-fn">scalars</span>(
+        <span class="tok-fn">select</span>(Document).<span class="tok-fn">order_by</span>(Document.id.<span class="tok-fn">desc</span>())))
+
+<span class="tok-pt">@app.get(<span class="tok-st">"/documents/{doc_id}"</span>, response_model=DocumentOut)</span>
+<span class="tok-kw">def</span> <span class="tok-fn">get_document</span>(doc_id: <span class="tok-nm">int</span>, db: Session = <span class="tok-fn">Depends</span>(get_db)):
+    <span class="tok-fl">doc</span> = db.<span class="tok-fn">get</span>(Document, doc_id)
+    <span class="tok-kw">if</span> doc <span class="tok-kw">is</span> <span class="tok-nm">None</span>:
+        <span class="tok-kw">raise</span> <span class="tok-fn">HTTPException</span>(<span class="tok-nm">404</span>, <span class="tok-st">"document not found"</span>)
+    <span class="tok-kw">return</span> doc</pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">세 엔드포인트</b>
+              <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.3rem,0.9vh,0.6rem)">
+                <li><span class="mk">P</span><span><code class="inl">POST /documents</code> — 업로드 → 메타 저장 → <code class="inl">201</code></span></li>
+                <li><span class="mk">G</span><span><code class="inl">GET /documents</code> — 목록(최신순, 배열)</span></li>
+                <li><span class="mk">G</span><span><code class="inl">GET /documents/{id}</code> — 단건(객체), 없으면 <code class="inl">404</code></span></li>
+              </ul>
+            </div>
+            <p class="note"><code class="inl">from_attributes = True</code>가 ORM 객체를 응답 스키마로 자동 변환한다. <code class="inl">id</code>·<code class="inl">created_at</code>은 DB가 채우므로 <code class="inl">refresh</code> 후 응답에 담긴다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 5단계 .env + .gitignore -->
+  <section class="slide t-autumn-a" aria-label="5단계 env 파일과 gitignore">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">2부 · 5단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">.env</code>로 자격증명 분리 · <span class="accent">커밋 차단 확인</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">.env — 프로젝트 루트</span></div>
+<pre><span class="tok-fl">POSTGRES_USER</span>=<span class="tok-nm">docpilot</span>
+<span class="tok-fl">POSTGRES_PASSWORD</span>=<span class="tok-nm">docpilot</span>
+<span class="tok-fl">POSTGRES_DB</span>=<span class="tok-nm">docpilot</span>
+<span class="tok-fl">DATABASE_URL</span>=<span class="tok-nm">postgresql+psycopg://docpilot:docpilot@<span class="tok-pt">db</span>:5432/docpilot</span></pre>
+          </div>
+          <div class="stack">
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">호스트가 <code class="inl">db</code>임에 주목</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">DATABASE_URL</code>의 호스트가 <code class="inl">localhost</code>가 아니라 <b><code class="inl">db</code></b>다. 이것이 Compose 서비스 이름(=네트워크상의 호스트명)이다.</p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — .gitignore 확인 (철칙)</span></div>
+<pre><span class="tok-cmd">grep</span> <span class="tok-fl">-q "^.env" .gitignore</span> \
+  &amp;&amp; <span class="tok-cmd">echo</span> <span class="tok-st">".env ignored OK"</span> \
+  || <span class="tok-cmd">echo</span> <span class="tok-st">"MISSING: add .env to .gitignore"</span></pre>
+            </div>
+            <p class="note"><code class="inl">.env ignored OK</code>가 나와야 한다. 안 나오면 <code class="inl">.gitignore</code>에 <code class="inl">.env</code> 줄을 추가한다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 6단계 docker-compose.yml 완결본 -->
+  <section class="slide t-autumn-b" aria-label="6단계 docker-compose.yml 완결본">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 6단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">docker-compose.yml</code> — 복붙 <span class="accent">완결본</span></h2>
+        <div class="code" style="max-width:min(93vw,940px);align-self:center;width:100%">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">docker-compose.yml — web + PostgreSQL 16</span></div>
+<pre><span class="tok-kw">services</span>:
+  <span class="tok-nm">db</span>:
+    <span class="tok-kw">image</span>: <span class="tok-fl">postgres:16</span>
+    <span class="tok-kw">environment</span>:
+      <span class="tok-fl">POSTGRES_USER</span>: <span class="tok-op">${POSTGRES_USER}</span>
+      <span class="tok-fl">POSTGRES_PASSWORD</span>: <span class="tok-op">${POSTGRES_PASSWORD}</span>
+      <span class="tok-fl">POSTGRES_DB</span>: <span class="tok-op">${POSTGRES_DB}</span>
+    <span class="tok-kw">volumes</span>:
+      - <span class="tok-fl">pgdata:/var/lib/postgresql/data</span>   <span class="tok-cm"># 데이터 영속화</span>
+    <span class="tok-kw">healthcheck</span>:
+      <span class="tok-fl">test</span>: [<span class="tok-st">"CMD-SHELL"</span>, <span class="tok-st">"pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"</span>]
+      <span class="tok-fl">interval</span>: <span class="tok-nm">5s</span>
+      <span class="tok-fl">timeout</span>: <span class="tok-nm">3s</span>
+      <span class="tok-fl">retries</span>: <span class="tok-nm">10</span>
+    <span class="tok-kw">ports</span>:
+      - <span class="tok-st">"5432:5432"</span>          <span class="tok-cm"># 로컬 DB 툴 접속용(선택)</span>
+
+  <span class="tok-nm">web</span>:
+    <span class="tok-kw">build</span>: <span class="tok-fl">.</span>                    <span class="tok-cm"># 현재 폴더의 Dockerfile로 빌드</span>
+    <span class="tok-kw">environment</span>:
+      <span class="tok-fl">DATABASE_URL</span>: <span class="tok-op">${DATABASE_URL}</span>
+    <span class="tok-kw">depends_on</span>:
+      <span class="tok-fl">db</span>:
+        <span class="tok-fl">condition</span>: <span class="tok-st">service_healthy</span>   <span class="tok-cm"># db healthy 후 web 시작</span>
+    <span class="tok-kw">ports</span>:
+      - <span class="tok-st">"8000:8000"</span>
+
+<span class="tok-kw">volumes</span>:
+  <span class="tok-nm">pgdata</span>:                       <span class="tok-cm"># 명명된 볼륨 선언</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. compose 해설 -->
+  <section class="slide t-autumn-b" aria-label="docker-compose 지시어 해설">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">2부 · 6단계 · 지시어 해설</div>
+        <h2 class="head">각 <span class="accent">항목</span>이 하는 일</h2>
+        <div class="card" style="max-width:min(95vw,1080px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:26%">항목</th><th>역할</th></tr></thead>
+            <tbody>
+              <tr><td><code>image: postgres:16</code></td><td>DB는 직접 빌드하지 않고 공식 이미지를 그대로 사용</td></tr>
+              <tr><td><code>build: .</code></td><td>web은 현재 폴더의 <code>Dockerfile</code>로 docpilot 이미지를 빌드</td></tr>
+              <tr><td><code>volumes: pgdata:...</code></td><td>DB 데이터를 명명 볼륨에 저장 → <b>컨테이너 지워도 유지</b></td></tr>
+              <tr><td><code>healthcheck</code></td><td><code>pg_isready</code>로 DB가 진짜 접속 가능한지 반복 확인</td></tr>
+              <tr><td><code>depends_on: service_healthy</code></td><td>db가 healthy가 될 때까지 web 시작을 <b>대기</b></td></tr>
+              <tr><td><code>ports: "8000:8000"</code></td><td>호스트 8000 → web 컨테이너 8000 매핑</td></tr>
+              <tr><td><code>${...}</code></td><td><code>.env</code>의 값을 주입 (자격증명·접속 URL)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note"><code class="inl">depends_on: condition: service_healthy</code> + <code class="inl">healthcheck</code>가 이번 구성의 핵심이다. 이게 없으면 web이 DB보다 먼저 떠서 접속 에러가 난다(흔한 함정).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 7단계 up --build + 기대 출력 -->
+  <section class="slide t-autumn-b" aria-label="7단계 스택 기동과 기대 출력">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">2부 · 7단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">up --build</code>로 기동 · 기대 <span class="accent">로그</span> 확인</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 스택 기동</span></div>
+<pre><span class="tok-cmd">docker</span> compose up <span class="tok-fl">--build</span></pre>
+            </div>
+            <div class="card" style="padding:clamp(0.55rem,1.2vw,1rem)">
+              <ul class="checklist" style="gap:clamp(0.3rem,0.9vh,0.6rem)">
+                <li><span class="mk">·</span><span><code class="inl">--build</code> = web 이미지를 새로 빌드</span></li>
+                <li><span class="mk">·</span><span>두 서비스 로그가 한 화면에 섞여 나온다 (<code class="inl">db-1</code>, <code class="inl">web-1</code> 접두어)</span></li>
+              </ul>
+            </div>
+          </div>
+          <div class="callout">
+            <b style="color:var(--accent);font-size:var(--small-size)">이 흐름이 보이면 성공 ✓</b>
+<pre style="font-family:var(--font-mono);font-size:var(--small-size);color:var(--ink);margin-top:0.5em;line-height:1.7;white-space:pre-wrap"><span style="color:var(--teal)">db-1</span>   | ... database system is ready
+       to accept connections
+<span style="color:var(--coral-deep)">web-1</span>  | INFO: Uvicorn running on
+       http://0.0.0.0:8000
+<span style="color:var(--coral-deep)">web-1</span>  | INFO: Application startup complete.</pre>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--micro-size)">web 기동 전에 db가 healthy가 되어야 하므로, db 로그가 먼저 안정된 뒤 web이 뜬다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 8단계 /documents 테스트 + 기대 출력 -->
+  <section class="slide t-autumn-b" aria-label="8단계 documents 테스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">3부 · 8단계 · 엔드포인트 테스트</div>
+        <h2 class="head"><code class="inl" style="font-size:0.85em">/documents</code> 업로드·조회 · 기대 <span class="accent">응답</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="code">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 새 터미널 (스택은 켠 채로)</span></div>
+<pre><span class="tok-cmd">echo</span> <span class="tok-st">"docpilot test document"</span> &gt; sample.txt
+
+<span class="tok-cm"># 1) 업로드 (메타가 DB에 저장됨)</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">-F "file=@sample.txt"</span> \
+  <span class="tok-fl">http://127.0.0.1:8000/documents</span>
+
+<span class="tok-cm"># 2) 목록 · 3) 단건</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">http://127.0.0.1:8000/documents</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">http://127.0.0.1:8000/documents/1</span></pre>
+          </div>
+          <div class="stack">
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">업로드 응답 (id·created_at은 DB가 채움)</b>
+<pre style="font-family:var(--font-mono);font-size:var(--small-size);color:var(--ink);margin-top:0.5em;line-height:1.6;white-space:pre-wrap">{<span style="color:var(--plum-deep)">"id"</span>:<span style="color:var(--terracotta-deep)">1</span>,<span style="color:var(--plum-deep)">"filename"</span>:<span style="color:var(--sage-deep)">"sample.txt"</span>,
+ <span style="color:var(--plum-deep)">"content_type"</span>:<span style="color:var(--sage-deep)">"text/plain"</span>,
+ <span style="color:var(--plum-deep)">"size_bytes"</span>:<span style="color:var(--terracotta-deep)">23</span>,
+ <span style="color:var(--plum-deep)">"created_at"</span>:<span style="color:var(--sage-deep)">"2026-09-.."</span>}</pre>
+            </div>
+            <p class="note">목록은 배열, 단건은 객체. 없는 id(<code class="inl">/documents/999</code>)는 <code class="inl">404</code> + <code class="inl">{"detail":"document not found"}</code>. 브라우저에서 <code class="inl">/docs</code>를 열면 파일 선택 UI로도 테스트할 수 있다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 9단계 볼륨 영속화 검증 (하이라이트) -->
+  <section class="slide t-autumn-b" aria-label="9단계 볼륨 영속화 검증">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">3부 · 9단계 · <span style="color:var(--plum-deep)">이번 주 하이라이트</span></div>
+        <h2 class="head">지웠다 다시 만들어도 <span class="accent">데이터가 산다</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 볼륨 유지 (-v 안 붙임!)</span></div>
+<pre><span class="tok-cmd">docker</span> compose down       <span class="tok-cm"># 컨테이너만 내림</span>
+<span class="tok-cmd">docker</span> compose up <span class="tok-fl">-d</span>     <span class="tok-cm"># 다시 올림</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">http://127.0.0.1:8000/documents</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">down</code> → <code class="inl">up</code> 했는데도 아까 올린 문서가 <b>그대로 조회</b>된다. 볼륨 덕분에 컨테이너 수명과 데이터가 분리됐기 때문이다.</p>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 반대로 볼륨까지 삭제(주의)</span></div>
+<pre><span class="tok-cmd">docker</span> compose down <span class="tok-fl">-v</span>    <span class="tok-cm"># -v = 볼륨까지 삭제</span>
+<span class="tok-cmd">docker</span> compose up <span class="tok-fl">-d</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">http://127.0.0.1:8000/documents</span>
+<span class="tok-cm"># []  (빈 배열 — 데이터 사라짐)</span></pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — psql로 직접 확인 & 커밋</span></div>
+<pre><span class="tok-cmd">docker</span> compose exec db psql <span class="tok-fl">-U docpilot -d docpilot</span> \
+  <span class="tok-fl">-c "SELECT id, filename, size_bytes FROM documents;"</span>
+
+<span class="tok-cmd">git</span> add Dockerfile main.py db.py \
+  requirements.txt docker-compose.yml
+<span class="tok-cmd">git</span> commit -m <span class="tok-st">"feat: docpilot week03 compose + /documents"</span></pre>
+            </div>
+          </div>
+        </div>
+        <p class="note">데이터는 컨테이너가 아니라 <b>볼륨</b>에 있었다. <code class="inl">.env</code>와 <code class="inl">sample.txt</code>는 커밋하지 않는다 — <code class="inl">git status</code>로 재확인.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 트러블슈팅 -->
+  <section class="slide t-autumn-b" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">증상 · 원인 · <span class="accent">해결</span></h2>
+        <div class="card" style="max-width:min(96vw,1140px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:30%">증상</th><th style="width:26%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td>web이 <code>connection refused</code>로 죽음</td><td>DB보다 먼저 기동</td><td><code>depends_on: condition: service_healthy</code> + healthcheck 확인</td></tr>
+              <tr><td><code>could not translate host name "db"</code></td><td>web이 <code>localhost</code>로 접속</td><td><code>.env</code>의 <code>DATABASE_URL</code> 호스트가 <code>db</code>인지 확인</td></tr>
+              <tr><td><code>password authentication failed</code></td><td><code>.env</code> 자격증명 불일치</td><td><code>POSTGRES_*</code>와 <code>DATABASE_URL</code>의 user/pw 일치 확인</td></tr>
+              <tr><td><code>port 5432 already in use</code></td><td>로컬 Postgres 실행 중</td><td>db <code>ports</code>를 <code>"5433:5432"</code>로 바꾸거나 로컬 pg 중지</td></tr>
+              <tr><td>코드 고쳤는데 반영 안 됨</td><td>web 이미지 재빌드 안 함</td><td><code>docker compose up --build</code></td></tr>
+              <tr><td><code>down</code> 후 데이터가 사라짐</td><td><code>down -v</code>로 볼륨 삭제</td><td>데이터 유지하려면 <code>-v</code> 없이 <code>down</code></td></tr>
+              <tr><td><code>ModuleNotFoundError: 'db'</code></td><td>Dockerfile에 <code>COPY db.py</code> 누락</td><td>3단계대로 한 줄 추가 후 재빌드</td></tr>
+              <tr><td><code>on_event startup deprecated</code> 경고</td><td>FastAPI 신버전 lifespan 권장</td><td>학습용은 무시 가능(동작함)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 과제 + 체크리스트 -->
+  <section class="slide t-autumn-b" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / 이번 주 제출물</div>
+        <h2 class="head">이번 주 <span class="accent">과제</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="stack">
+            <div class="card"><b style="color:var(--accent)">1. 필수</b><p class="lead">실습 완주 → <code class="inl">/documents</code> 업로드·목록·단건 동작 + <b>볼륨 영속화(9단계)</b>를 스크린샷/로그로 증빙</p></div>
+            <div class="card"><b style="color:var(--accent)">2. 삭제 엔드포인트</b><p class="lead"><code class="inl">DELETE /documents/{doc_id}</code> — 있으면 삭제 후 <code class="inl">204</code>, 없으면 <code class="inl">404</code>. 업로드→삭제→목록 빔을 <code class="inl">curl -X DELETE</code>로 확인</p></div>
+            <div class="card"><b style="color:var(--accent)">3. 개념 정리(README)</b><p class="lead">볼륨이 왜 필요한지 2줄 · <code class="inl">depends_on</code>+healthcheck 없으면 무슨 일이 나는지 2줄 · <code class="inl">.env</code> 커밋 금지 이유 1줄</p></div>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.28rem,0.85vh,0.6rem)">
+              <li><span class="mk">✓</span><span><code class="inl">requirements.txt</code>에 SQLAlchemy·psycopg 추가</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">db.py</code>에 <code class="inl">DATABASE_URL</code> 연결 + <code class="inl">Document</code> 모델</span></li>
+              <li><span class="mk">✓</span><span>Dockerfile에 <code class="inl">COPY db.py .</code> 추가</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">main.py</code>에 <code class="inl">/documents</code> POST/GET 구현</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">.env</code> 분리 + <code class="inl">.gitignore</code>로 차단</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">docker-compose.yml</code>로 web+PostgreSQL 기동</span></li>
+              <li><span class="mk">✓</span><span>psql로 DB 행 확인 · 볼륨 영속화 확인</span></li>
+              <li><span class="mk">✓</span><span>(과제) <code class="inl">DELETE /documents/{id}</code> 추가</span></li>
+            </ul>
+          </div>
+        </div>
+        <p class="note">제출: LMS에 <b>저장소 URL</b>, <b>볼륨 영속화 증빙</b>, <b>마지막 커밋 해시</b>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. 다음 주 예고 -->
+  <section class="slide t-autumn-b" aria-label="다음 주 예고">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Next · Week 04 · 다음 블록의 시작</div>
+        <h2 class="head" style="font-size:var(--title-size)">다음 주 —<br/><span class="accent">Kubernetes 배포 기초</span></h2>
+        <p class="hero-line" style="max-width:60ch">Compose로 <b style="color:var(--ink)">한 대</b>에서 여러 컨테이너를 띄우는 건 배웠다. 실제 운영은 <b style="color:var(--ink)">여러 대의 서버</b>에 걸쳐 자동으로 확장·복구되어야 한다.</p>
+        <div class="hero-evo" style="gap:0.6em">
+          <span class="chip">kind / minikube 로컬 클러스터</span>
+          <span class="chip">Deployment + Service 배포</span>
+          <span class="chip"><code class="inl" style="background:none;color:var(--teal)">kubectl</code>로 상태 확인</span>
+        </div>
+        <p class="note">2주차에 레지스트리에 올린 이미지와 3주차의 DB 개념이 여기서 <b>쿠버네티스 리소스로 재구성</b>된다.</p>
+        <div class="hero-evo" style="margin-top:0.4em">
+          <span class="chip" style="border-color:var(--coral-deep)">W03 Compose 멀티 컨테이너</span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--plum) 25%,var(--paper))">W04 Kubernetes 배포</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
