@@ -1,0 +1,1299 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 07 — 멀티모달과 Hugging Face</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01~06 덱과 동일한 디자인 시스템 계승 (Block 2 진행)
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 코드 블록 조밀 변형 (긴 코드 대응) */
+.code pre.dense { font-size: clamp(0.6rem, 0.98vw, 0.86rem); line-height: 1.5; }
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* 파이프라인 흐름 (개념 개요) */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; font-family: var(--font-mono); font-size: var(--small-size); }
+.flow .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.75em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.flow .st.now { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight: 800; border-color: var(--plum-deep); }
+.flow .st.fin { background: color-mix(in srgb, var(--sage) 30%, var(--paper)); color: var(--ink); font-weight: 700; }
+.flow .ar { color: var(--accent); font-weight: 800; }
+
+/* 벡터/유사도 스트립 */
+.reqstrip { display: flex; flex-wrap: wrap; gap: 5px; }
+.reqstrip span {
+  font-family: var(--font-mono); font-size: var(--micro-size); font-weight: 800;
+  padding: 0.2em 0.5em; border-radius: 6px;
+  background: color-mix(in srgb, var(--plum) 32%, var(--paper)); color: var(--plum-deep);
+  border: 1px solid color-mix(in srgb, var(--plum-deep) 38%, transparent);
+}
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .nav-dots { display: none; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 07</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">21</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-autumn-b" aria-label="타이틀">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · Block 2 · AI 서비스</span>
+      <div class="eyebrow">Week 07 — 멀티모달과 Hugging Face</div>
+      <h1 class="title">텍스트 너머 —<br/><span style="color:var(--accent)">이미지 · 음성 · 임베딩</span></h1>
+      <p class="hero-line">week06의 <b style="color:var(--ink)">/chat</b>은 "글자를 만드는" 능력이었다. 이번 주는 <b style="color:var(--ink)">docpilot</b>에 (1) 다른 형태의 입력을 이해하는 <b style="color:var(--ink)">멀티모달</b>(이미지 캡셔닝·음성→텍스트)과 (2) 문장을 숫자 벡터로 바꾸는 <b style="color:var(--ink)">Hugging Face 임베딩</b>을 더한다.</p>
+      <div class="hero-evo">
+        <span class="chip">W06 <code class="inl" style="background:none;color:var(--teal)">/chat</code> (생성)</span>
+        <span class="arrow">→</span>
+        <span class="chip"><code class="inl" style="background:none;color:var(--teal)">/embed</code> · <code class="inl" style="background:none;color:var(--teal)">/caption</code> · <code class="inl" style="background:none;color:var(--teal)">/transcribe</code> · HF Inference</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-autumn-b" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.35" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:88ch">
+          <li><span class="mk">1</span><span>멀티모달(이미지·음성·비전)의 개념과 대표 태스크(<b>captioning, ASR</b>)를 예로 설명한다.</span></li>
+          <li><span class="mk">2</span><span>Hugging Face 생태계(<b>Hub, <code class="inl">transformers</code>, Inference API, 임베딩 모델</b>)를 구성 요소별로 구분한다.</span></li>
+          <li><span class="mk">3</span><span><b>자체호스팅(로컬 transformers) vs 매니지드(Inference API)</b> 트레이드오프를 설명한다.</span></li>
+          <li><span class="mk">4</span><span>docpilot에 이미지 캡셔닝 <b>또는</b> 음성→텍스트 엔드포인트를 추가한다.</span></li>
+          <li><span class="mk">5</span><span>HF 임베딩 모델로 텍스트를 벡터로 바꾸고 <b>코사인 유사도</b>를 계산한다(RAG 준비).</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 개요 / 이번 주 지도 -->
+  <section class="slide t-autumn-b" aria-label="개념 개요">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 / 이번 주 지도 — Block 2 진행</div>
+        <h2 class="head">두뇌는 붙였다. 이제 <span class="accent">감각과 기억</span>을 붙인다</h2>
+        <div class="flow">
+          <span class="st fin">week06 /chat<br/>(LLM 생성)</span><span class="ar">→</span>
+          <span class="st now">week07 멀티모달·임베딩</span><span class="ar">→</span>
+          <span class="st">week08 RAG /ask<br/>(임베딩 + 생성)</span>
+        </div>
+        <div class="grid grid-3" style="max-width:min(96vw,1120px)">
+          <div class="card"><b style="color:var(--accent)">① 멀티모달</b><p class="lead" style="margin-top:0.25em">이미지·음성 등 다른 형태의 입력을 이해</p></div>
+          <div class="card"><b style="color:var(--accent)">② Hugging Face</b><p class="lead" style="margin-top:0.25em">Hub · transformers · Inference API</p></div>
+          <div class="card"><b style="color:var(--accent)">③ 임베딩</b><p class="lead" style="margin-top:0.25em">문장 → 숫자 벡터, 뜻이 가까우면 벡터도 가깝다</p></div>
+          <div class="card"><b style="color:var(--accent)">④ 코사인 유사도</b><p class="lead" style="margin-top:0.25em">두 벡터의 각도로 의미 유사도 측정</p></div>
+          <div class="card"><b style="color:var(--accent)">⑤ 자체호스팅 vs 매니지드</b><p class="lead" style="margin-top:0.25em">로컬 실행 vs HF가 대신 호스팅</p></div>
+          <div class="card"><b style="color:var(--accent)">⑥ /embed · /caption</b><p class="lead" style="margin-top:0.25em">임베딩 API + 멀티모달 엔드포인트</p></div>
+        </div>
+        <p class="note">3부 구성: <b>1부 임베딩(로컬, 가장 중요·필수) → 2부 멀티모달 엔드포인트(택1) → 3부 매니지드 대안(HF Inference API)</b>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ① 멀티모달이란 -->
+  <section class="slide t-autumn-b" aria-label="멀티모달이란">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ① / 멀티모달이란</div>
+        <h2 class="head">모달리티는 <span class="accent">데이터의 형태</span></h2>
+        <p class="lead" style="max-width:88ch">"모달리티(modality)"는 데이터의 형태다 — 텍스트, 이미지, 음성, 비디오. <b>멀티모달</b> 모델/시스템은 여러 형태를 함께 다룬다. docpilot 관점에서는 사용자가 <b>스크린샷·다이어그램</b>이나 <b>음성 메모</b>로 질문을 던질 수 있게 된다.</p>
+        <div class="card" style="max-width:min(97vw,1160px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:26%">태스크</th><th style="width:34%">입력 → 출력</th><th>예 모델</th></tr></thead>
+            <tbody>
+              <tr><td class="em">이미지 캡셔닝 (image-to-text)</td><td>이미지 → 설명 문장</td><td><code>Salesforce/blip-image-captioning-base</code></td></tr>
+              <tr><td class="em">자동 음성 인식 (ASR)</td><td>오디오 → 텍스트</td><td><code>openai/whisper-small</code></td></tr>
+              <tr><td class="em">비전 질의응답 (VQA) / 멀티모달 LLM</td><td>이미지 + 질문 → 답</td><td>GPT-4o, Gemini(비전)</td></tr>
+              <tr><td class="em">텍스트 임베딩</td><td>문장 → 숫자 벡터</td><td><code>sentence-transformers/all-MiniLM-L6-v2</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">이번 주는 <b>이미지 캡셔닝</b> 또는 <b>ASR</b>(택1) + <b>텍스트 임베딩</b>(필수)에 집중한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ② Hugging Face 생태계 -->
+  <section class="slide t-autumn-b" aria-label="Hugging Face 생태계">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ② / Hugging Face 생태계</div>
+        <h2 class="head">"깃허브 for ML" — <span class="accent">Hub와 두 갈래 추론</span></h2>
+        <div class="grid grid-2" style="max-width:min(97vw,1160px)">
+          <div class="card"><span class="pill">Hub</span><p class="lead" style="margin-top:0.4em">모델·데이터셋·데모(Spaces)를 공유하는 "깃허브 for ML". 모델마다 <b>카드(설명)</b>와 태스크 태그가 있다.</p></div>
+          <div class="card"><span class="pill">transformers</span><p class="lead" style="margin-top:0.4em">모델을 <b>내 컴퓨터/서버에서 직접</b> 실행하는 파이썬 라이브러리. <code class="inl">pipeline("task", model=...)</code> 한 줄로 추론.</p></div>
+          <div class="card"><span class="pill">Inference API</span><p class="lead" style="margin-top:0.4em">HF가 <b>대신 호스팅</b>해 주는 HTTP API. 모델을 내려받지 않고 호출(Inference Providers).</p></div>
+          <div class="card"><span class="pill">임베딩 모델</span><p class="lead" style="margin-top:0.4em"><code class="inl">sentence-transformers</code> 계열이 대표적. 문장을 <b>고정 길이 벡터</b>로 바꾼다.</p></div>
+        </div>
+        <p class="note">이번 주 흐름: <b>transformers</b>로 로컬 실행(1·2부) → <b>Inference API</b>로 매니지드 대안(3부)을 비교.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ③ 임베딩과 유사도 -->
+  <section class="slide t-autumn-b" aria-label="임베딩과 유사도">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ③ / 임베딩과 유사도 — RAG의 씨앗</div>
+        <h2 class="head">뜻이 비슷하면 <span class="accent">벡터도 가깝다</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <b style="color:var(--accent)">임베딩(embedding)</b>
+            <p class="lead" style="margin-top:0.35em">문장을 의미를 담은 숫자 벡터(예: <b>384차원</b>)로 변환. 뜻이 비슷한 문장은 벡터도 가깝다.</p>
+            <b style="color:var(--accent);display:block;margin-top:0.7em">코사인 유사도(cosine similarity)</b>
+            <p class="lead" style="margin-top:0.35em">두 벡터가 이루는 <b>각도</b>로 유사도를 잰다. <b>1</b>에 가까울수록 비슷, <b>0</b>이면 무관.</p>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%;background:linear-gradient(160deg,color-mix(in srgb,var(--plum) 16%,var(--paper)),var(--paper))">
+            <div class="reqstrip" style="flex-direction:column;gap:8px">
+              <span style="width:100%">"강아지가 뛴다" → [0.12, -0.4, ...]</span>
+              <span style="width:100%">"개가 달린다" → [0.10, -0.38, ...]</span>
+            </div>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">↑ 두 벡터의 코사인 유사도 <b>높음</b>(비슷)</p>
+            <div class="reqstrip" style="margin-top:0.6em"><span style="width:100%;background:color-mix(in srgb,var(--ochre) 30%,var(--paper));color:var(--terracotta-deep);border-color:var(--terracotta)">"세금 신고 방법" → [-0.5, 0.2, ...]</span></div>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">↓ 코사인 유사도 <b>낮음</b>(무관)</p>
+          </div>
+        </div>
+        <p class="note">week08 RAG에서는 <b>"질문 임베딩"</b>과 <b>"문서 조각 임베딩"</b>의 유사도로 관련 조각을 검색한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 개념 ④ 자체호스팅 vs 매니지드 -->
+  <section class="slide t-autumn-b" aria-label="자체호스팅 vs 매니지드">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ④ / 자체호스팅 vs 매니지드 트레이드오프</div>
+        <h2 class="head">직접 돌릴까, <span class="accent">맡길까</span></h2>
+        <div class="card" style="max-width:min(97vw,1180px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:22%">기준</th><th style="width:39%">로컬 <code>transformers</code> (자체호스팅)</th><th>Inference API (매니지드)</th></tr></thead>
+            <tbody>
+              <tr><td class="em">초기 지연</td><td>모델 다운로드·로딩 필요(수 초~분)</td><td>없음(HTTP 호출)</td></tr>
+              <tr><td class="em">비용</td><td>하드웨어(특히 GPU)·전기</td><td>호출량 기반 요금(무료 티어 있음)</td></tr>
+              <tr><td class="em">데이터 프라이버시</td><td>데이터가 서버 밖으로 안 나감</td><td>외부로 전송됨</td></tr>
+              <tr><td class="em">오프라인</td><td>가능</td><td>불가(네트워크 필요)</td></tr>
+              <tr><td class="em">확장성</td><td>직접 스케일링(week12 K8s)</td><td>제공자가 처리</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">실무 감각: <b>개인정보·규제 데이터·대량 처리·오프라인</b>이면 자체호스팅, <b>빠른 시작·간헐적 사용</b>이면 매니지드.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 사전 준비 -->
+  <section class="slide t-autumn-b" aria-label="사전 준비">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">사전 준비 / 계정 · 토큰 · 런타임</div>
+        <h2 class="head">week06 산출물 + <span class="accent">HF 토큰</span></h2>
+        <div class="grid grid-3" style="max-width:min(96vw,1140px)">
+          <div class="card">
+            <span class="pill">week06 docpilot</span>
+            <p class="lead" style="margin-top:0.4em"><code class="inl">/chat</code>이 동작하는 상태. <code class="inl">app/</code> 패키지 구조와 <code class="inl">app/config.py</code>(Settings)가 이미 있어야 한다.</p>
+          </div>
+          <div class="card">
+            <span class="pill">Hugging Face 토큰</span>
+            <p class="lead" style="margin-top:0.4em"><b>huggingface.co</b> → Settings → Access Tokens → New token. <code class="inl">read</code> 권한이면 충분. 무료 티어로 Inference API 소량 사용.</p>
+          </div>
+          <div class="card">
+            <span class="pill">디스크 · ffmpeg</span>
+            <p class="lead" style="margin-top:0.4em">로컬 모델은 <b>수백 MB~수 GB</b> 다운로드. 음성 실습 시 <code class="inl">ffmpeg</code> 설치 권장.</p>
+          </div>
+        </div>
+        <div class="code" style="max-width:min(96vw,1140px);align-self:center;width:100%">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — ffmpeg (오디오 디코딩)</span></div>
+<pre class="dense"><span class="tok-cmd">sudo</span> apt-get update &amp;&amp; <span class="tok-cmd">sudo</span> apt-get install <span class="tok-fl">-y ffmpeg</span>   <span class="tok-cm"># Debian/Ubuntu</span>
+<span class="tok-cm"># macOS: brew install ffmpeg</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 실습 로드맵 -->
+  <section class="slide t-autumn-b" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기</div>
+        <h2 class="head">3부 · <span class="accent">docpilot에 감각과 기억 붙이기</span></h2>
+        <div class="grid grid-3" style="max-width:min(96vw,1140px)">
+          <div class="card"><span class="step-badge"><span class="num">1</span>1부 · 임베딩</span><p class="lead" style="margin-top:0.5em"><code class="inl">sentence-transformers</code> → <code class="inl">app/embeddings.py</code> → <code class="inl">/embed</code>. <b>가장 중요, 반드시 완료</b></p></div>
+          <div class="card"><span class="step-badge"><span class="num">2</span>2부 · 멀티모달(택1)</span><p class="lead" style="margin-top:0.5em"><code class="inl">/caption</code>(이미지) <b>또는</b> <code class="inl">/transcribe</code>(음성) — 로컬 <code class="inl">transformers</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">3</span>3부 · 매니지드 대안</span><p class="lead" style="margin-top:0.5em">HF <code class="inl">AsyncInferenceClient</code>로 같은 일을 → 트레이드오프 체감</p></div>
+        </div>
+        <p class="note">작업 디렉터리는 docpilot 프로젝트 루트. 실행 명령은 week06과 같이 <code class="inl">uvicorn app.main:app --reload</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 1부 1단계 패키지 설치 -->
+  <section class="slide t-autumn-b" aria-label="1부 1단계 패키지 설치">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 1단계 · 실행 확인</div>
+        <h2 class="head">패키지 설치 — <span class="accent">ML 스택</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 가상환경 활성화 상태에서</span></div>
+<pre class="dense"><span class="tok-cmd">pip</span> install <span class="tok-st">"sentence-transformers&gt;=3.0"</span> \
+  <span class="tok-st">"transformers&gt;=4.44"</span> \
+  <span class="tok-st">"torch&gt;=2.2"</span> \
+  <span class="tok-st">"pillow&gt;=10.0"</span> \
+  <span class="tok-st">"huggingface_hub&gt;=0.24"</span> numpy
+
+<span class="tok-cm"># import 동작 확인</span>
+<span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"import sentence_transformers, transformers, torch; print('ml stack ok, torch', torch.__version__)"</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">requirements.txt — 아래 추가</span></div>
+<pre class="dense"><span class="tok-fl">sentence-transformers&gt;=3.0</span>
+<span class="tok-fl">transformers&gt;=4.44</span>
+<span class="tok-fl">torch&gt;=2.2</span>
+<span class="tok-fl">pillow&gt;=10.0</span>
+<span class="tok-fl">huggingface_hub&gt;=0.24</span>
+<span class="tok-fl">numpy</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">ml stack ok, torch 2.x.x</code>. <code class="inl">torch</code>가 무거우면 CPU 휠 사용(<code class="inl">--index-url .../whl/cpu</code>).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 1부 2단계 HF 토큰 .env + config.py -->
+  <section class="slide t-autumn-b" aria-label="1부 2단계 HF 토큰 환경변수">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 2단계 · 실행 확인</div>
+        <h2 class="head">HF 토큰과 모델명을 <span class="accent">환경</span>에</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">.env — 추가 (git 커밋 금지)</span></div>
+<pre class="dense"><span class="tok-cm"># Hugging Face</span>
+<span class="tok-kw">HF_TOKEN</span>=<span class="tok-st">hf_...본인_토큰...</span>
+<span class="tok-kw">EMBEDDING_MODEL</span>=<span class="tok-st">sentence-transformers/all-MiniLM-L6-v2</span>
+<span class="tok-kw">CAPTION_MODEL</span>=<span class="tok-st">Salesforce/blip-image-captioning-base</span>
+<span class="tok-kw">ASR_MODEL</span>=<span class="tok-st">openai/whisper-small</span></pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/config.py — Settings 클래스 안에 추가</span></div>
+<pre class="dense"><span class="tok-cm"># Hugging Face</span>
+hf_token: <span class="tok-fl">str</span> | <span class="tok-kw">None</span> = <span class="tok-kw">None</span>
+embedding_model: <span class="tok-fl">str</span> = \
+    <span class="tok-st">"sentence-transformers/all-MiniLM-L6-v2"</span>
+caption_model: <span class="tok-fl">str</span> = \
+    <span class="tok-st">"Salesforce/blip-image-captioning-base"</span>
+asr_model: <span class="tok-fl">str</span> = <span class="tok-st">"openai/whisper-small"</span></pre>
+          </div>
+        </div>
+        <div class="callout" style="max-width:min(96vw,1140px);align-self:center;width:100%;padding:clamp(0.6rem,1.3vw,1.1rem)">
+          <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+          <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">python -c "from app.config import get_settings; s=get_settings(); print(s.embedding_model, '| hf token set:', bool(s.hf_token))"</code> → <code class="inl">sentence-transformers/all-MiniLM-L6-v2 | hf token set: True</code></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 1부 3단계 임베딩 모듈 -->
+  <section class="slide t-autumn-b" aria-label="1부 3단계 임베딩 모듈">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 3단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">app/embeddings.py</code> — <span class="accent">벡터 + 유사도</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/embeddings.py</span></div>
+<pre class="dense"><span class="tok-kw">from</span> functools <span class="tok-kw">import</span> lru_cache
+<span class="tok-kw">import</span> numpy <span class="tok-kw">as</span> np
+<span class="tok-kw">from</span> sentence_transformers <span class="tok-kw">import</span> SentenceTransformer
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+
+
+<span class="tok-kw">@lru_cache</span>
+<span class="tok-kw">def</span> <span class="tok-fn">get_model</span>() -&gt; SentenceTransformer:
+    <span class="tok-cm"># 모델을 최초 1회만 로딩(프로세스 내 재사용)</span>
+    s = get_settings()
+    <span class="tok-kw">return</span> SentenceTransformer(s.embedding_model)
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">embed</span>(texts: <span class="tok-fl">list</span>[<span class="tok-fl">str</span>]) -&gt; np.ndarray:
+    model = get_model()
+    <span class="tok-kw">return</span> model.encode(
+        texts,
+        normalize_embeddings=<span class="tok-kw">True</span>,  <span class="tok-cm"># L2 정규화 → 내적=코사인</span>
+        convert_to_numpy=<span class="tok-kw">True</span>)
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">cosine_similarity</span>(a, b) -&gt; <span class="tok-fl">float</span>:
+    <span class="tok-cm"># 정규화된 두 벡터의 코사인 유사도(=내적)</span>
+    <span class="tok-kw">return</span> <span class="tok-fl">float</span>(np.dot(a, b))</pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">핵심 설계</b>
+              <p class="lead" style="margin-top:0.35em">모델은 <b>한 번만 로딩</b>해 재사용한다(<code class="inl">@lru_cache</code>). 매 호출 로딩은 느리고 낭비.</p>
+            </div>
+            <div class="note"><code class="inl">normalize_embeddings=True</code>로 L2 정규화하면 <b>내적이 곧 코사인 유사도</b>가 되어 계산이 간단해진다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. 1부 3단계 확인 스크립트 -->
+  <section class="slide t-autumn-b" aria-label="1부 3단계 확인 스크립트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 3단계 · 실행 확인</div>
+        <h2 class="head">스크립트로 <span class="accent">의미가 담겼는지</span> 확인</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">scratch_embed.py — 임시 스크립트</span></div>
+<pre class="dense"><span class="tok-kw">from</span> app.embeddings <span class="tok-kw">import</span> embed, cosine_similarity
+
+sentences = [<span class="tok-st">"강아지가 공원에서 뛴다"</span>,
+             <span class="tok-st">"개가 달리고 있다"</span>,
+             <span class="tok-st">"오늘 세금 신고를 했다"</span>]
+vecs = embed(sentences)
+<span class="tok-fn">print</span>(<span class="tok-st">"shape:"</span>, vecs.shape)  <span class="tok-cm"># 예: (3, 384)</span>
+<span class="tok-fn">print</span>(<span class="tok-st">"뜻 비슷:"</span>,
+      <span class="tok-fn">round</span>(cosine_similarity(vecs[<span class="tok-nm">0</span>], vecs[<span class="tok-nm">1</span>]), <span class="tok-nm">3</span>))
+<span class="tok-fn">print</span>(<span class="tok-st">"뜻 무관:"</span>,
+      <span class="tok-fn">round</span>(cosine_similarity(vecs[<span class="tok-nm">0</span>], vecs[<span class="tok-nm">2</span>]), <span class="tok-nm">3</span>))</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 실행</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> <span class="tok-fl">scratch_embed.py</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인 (최초는 모델 다운로드로 지연)</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">shape: (3, 384)</code>, 그리고 <b>"뜻 비슷" 값이 "뜻 무관" 값보다 확실히 크다</b> → 임베딩이 의미를 담고 있음.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 1부 4단계 /embed 엔드포인트 -->
+  <section class="slide t-autumn-b" aria-label="1부 4단계 embed 엔드포인트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 4단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/embed</code> 엔드포인트 — <span class="accent">API로 노출</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 추가</span></div>
+<pre class="dense"><span class="tok-kw">from</span> pydantic <span class="tok-kw">import</span> BaseModel, Field
+<span class="tok-kw">from</span> app <span class="tok-kw">import</span> embeddings
+
+
+<span class="tok-kw">class</span> <span class="tok-fn">EmbedRequest</span>(BaseModel):
+    texts: <span class="tok-fl">list</span>[<span class="tok-fl">str</span>] = Field(
+        ..., min_length=<span class="tok-nm">1</span>, max_length=<span class="tok-nm">64</span>)
+
+
+<span class="tok-kw">class</span> <span class="tok-fn">EmbedResponse</span>(BaseModel):
+    model: <span class="tok-fl">str</span>
+    dim: <span class="tok-fl">int</span>
+    vectors: <span class="tok-fl">list</span>[<span class="tok-fl">list</span>[<span class="tok-fl">float</span>]]
+
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/embed"</span>, response_model=EmbedResponse)
+<span class="tok-kw">async def</span> <span class="tok-fn">create_embeddings</span>(req: EmbedRequest):
+    <span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+    vecs = embeddings.embed(req.texts)
+    <span class="tok-kw">return</span> EmbedResponse(
+        model=get_settings().embedding_model,
+        dim=<span class="tok-fl">int</span>(vecs.shape[<span class="tok-nm">1</span>]),
+        vectors=vecs.tolist())</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 서버 켜고 호출</span></div>
+<pre class="dense"><span class="tok-cmd">uvicorn</span> <span class="tok-fl">app.main:app --reload</span>
+
+<span class="tok-cmd">curl</span> <span class="tok-fl">-s -X POST localhost:8000/embed</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"texts":["docpilot은 문서 도우미다","kubernetes 배포"]}'</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">dim: 384</code>와 벡터 앞 몇 개 숫자가 출력된다. 이 <code class="inl">/embed</code>가 <b>week08 인덱싱 파이프라인의 첫 부품</b>이 된다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 2부 5단계-A 이미지 캡셔닝 -->
+  <section class="slide t-autumn-b" aria-label="2부 5단계 A 이미지 캡셔닝">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 5단계-A · 택1 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/caption</code> — <span class="accent">이미지를 문장으로</span> (BLIP)</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/vision.py</span></div>
+<pre class="dense"><span class="tok-kw">import</span> io
+<span class="tok-kw">from</span> functools <span class="tok-kw">import</span> lru_cache
+<span class="tok-kw">from</span> PIL <span class="tok-kw">import</span> Image
+<span class="tok-kw">from</span> transformers <span class="tok-kw">import</span> pipeline
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+
+
+<span class="tok-kw">@lru_cache</span>
+<span class="tok-kw">def</span> <span class="tok-fn">get_captioner</span>():
+    s = get_settings()
+    <span class="tok-kw">return</span> pipeline(<span class="tok-st">"image-to-text"</span>,
+                    model=s.caption_model)
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">caption_image</span>(image_bytes: <span class="tok-fl">bytes</span>) -&gt; <span class="tok-fl">str</span>:
+    img = Image.open(io.BytesIO(image_bytes)).convert(<span class="tok-st">"RGB"</span>)
+    result = get_captioner()(img)
+    <span class="tok-cm"># [{"generated_text": "a dog running ..."}]</span>
+    <span class="tok-kw">return</span> result[<span class="tok-nm">0</span>][<span class="tok-st">"generated_text"</span>].strip()</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 업로드 엔드포인트</span></div>
+<pre class="dense"><span class="tok-kw">from</span> fastapi <span class="tok-kw">import</span> UploadFile, File, HTTPException
+<span class="tok-kw">from</span> app <span class="tok-kw">import</span> vision
+
+ALLOWED = {<span class="tok-st">"image/jpeg"</span>, <span class="tok-st">"image/png"</span>, <span class="tok-st">"image/webp"</span>}
+MAX_BYTES = <span class="tok-nm">8</span> * <span class="tok-nm">1024</span> * <span class="tok-nm">1024</span>  <span class="tok-cm"># 8MB</span>
+
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/caption"</span>)
+<span class="tok-kw">async def</span> <span class="tok-fn">caption</span>(file: UploadFile = File(...)):
+    <span class="tok-kw">if</span> file.content_type <span class="tok-kw">not in</span> ALLOWED:
+        <span class="tok-kw">raise</span> HTTPException(<span class="tok-nm">415</span>, <span class="tok-st">"unsupported type"</span>)
+    data = <span class="tok-kw">await</span> file.read()
+    <span class="tok-kw">if</span> <span class="tok-fn">len</span>(data) &gt; MAX_BYTES:
+        <span class="tok-kw">raise</span> HTTPException(<span class="tok-nm">413</span>, <span class="tok-st">"file too large"</span>)
+    <span class="tok-kw">return</span> {<span class="tok-st">"filename"</span>: file.filename,
+            <span class="tok-st">"caption"</span>: vision.caption_image(data)}</pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">curl -F "file=@sample.jpg;type=image/jpeg" localhost:8000/caption</code> → <code class="inl">{"caption": "a dog running through a grassy field"}</code></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. 2부 5단계-B 음성→텍스트 -->
+  <section class="slide t-autumn-b" aria-label="2부 5단계 B 음성 텍스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 5단계-B · 택1 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/transcribe</code> — <span class="accent">음성을 받아쓰기</span> (Whisper)</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/audio.py</span></div>
+<pre class="dense"><span class="tok-kw">import</span> tempfile
+<span class="tok-kw">from</span> functools <span class="tok-kw">import</span> lru_cache
+<span class="tok-kw">from</span> transformers <span class="tok-kw">import</span> pipeline
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+
+
+<span class="tok-kw">@lru_cache</span>
+<span class="tok-kw">def</span> <span class="tok-fn">get_transcriber</span>():
+    s = get_settings()
+    <span class="tok-kw">return</span> pipeline(
+        <span class="tok-st">"automatic-speech-recognition"</span>,
+        model=s.asr_model)
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">transcribe</span>(audio_bytes, suffix=<span class="tok-st">".wav"</span>) -&gt; <span class="tok-fl">str</span>:
+    <span class="tok-kw">with</span> tempfile.NamedTemporaryFile(
+            suffix=suffix, delete=<span class="tok-kw">True</span>) <span class="tok-kw">as</span> tmp:
+        tmp.write(audio_bytes); tmp.flush()
+        <span class="tok-cm"># Whisper 기본 30초 창 → 긴 입력은 청킹 필요</span>
+        result = get_transcriber()(
+            tmp.name, chunk_length_s=<span class="tok-nm">30</span>,
+            return_timestamps=<span class="tok-kw">True</span>)
+    <span class="tok-kw">return</span> result[<span class="tok-st">"text"</span>].strip()</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py + bash 호출</span></div>
+<pre class="dense"><span class="tok-kw">import</span> os
+<span class="tok-kw">from</span> app <span class="tok-kw">import</span> audio
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/transcribe"</span>)
+<span class="tok-kw">async def</span> <span class="tok-fn">transcribe_audio</span>(file: UploadFile = File(...)):
+    data = <span class="tok-kw">await</span> file.read()
+    suffix = os.path.splitext(
+        file.filename <span class="tok-kw">or</span> <span class="tok-st">"a.wav"</span>)[<span class="tok-nm">1</span>] <span class="tok-kw">or</span> <span class="tok-st">".wav"</span>
+    <span class="tok-kw">return</span> {<span class="tok-st">"filename"</span>: file.filename,
+            <span class="tok-st">"text"</span>: audio.transcribe(data, suffix=suffix)}
+
+<span class="tok-cm"># 샘플은 실제 flac → 확장자·MIME을 flac로</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">-F "file=@sample.flac;type=audio/flac"</span> \
+  <span class="tok-fl">localhost:8000/transcribe</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">"text": "..."</code>에 받아쓴 문장. 30초 초과 입력은 <code class="inl">chunk_length_s=30</code> + <code class="inl">return_timestamps=True</code>로 잘리지 않게 처리.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 3부 6단계 매니지드 hf_managed.py -->
+  <section class="slide t-autumn-b" aria-label="3부 6단계 매니지드 hf 클라이언트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 6단계</div>
+        <h2 class="head">매니지드 — <span class="accent">HF Inference API</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/hf_managed.py</span></div>
+<pre class="dense"><span class="tok-kw">from</span> huggingface_hub <span class="tok-kw">import</span> AsyncInferenceClient
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+
+<span class="tok-cm"># 레거시 api-inference URL을 직접 치지 말 것.</span>
+<span class="tok-cm"># InferenceClient가 최신 라우팅을 대신 처리한다.</span>
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">_client</span>() -&gt; AsyncInferenceClient:
+    s = get_settings()
+    <span class="tok-kw">if not</span> s.hf_token:
+        <span class="tok-kw">raise</span> <span class="tok-fn">RuntimeError</span>(<span class="tok-st">"HF_TOKEN is required"</span>)
+    <span class="tok-kw">return</span> AsyncInferenceClient(token=s.hf_token)
+
+
+<span class="tok-kw">async def</span> <span class="tok-fn">embed_via_api</span>(texts) -&gt; <span class="tok-fl">list</span>:
+    s = get_settings()
+    client = _client()
+    vectors = []
+    <span class="tok-kw">for</span> text <span class="tok-kw">in</span> texts:
+        vec = <span class="tok-kw">await</span> client.feature_extraction(
+            text, model=s.embedding_model)
+        vectors.append(vec.tolist())
+    <span class="tok-kw">return</span> vectors</pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">왜 AsyncInferenceClient인가</b>
+              <p class="lead" style="margin-top:0.35em">예전 serverless 엔드포인트는 <b>Inference Providers</b>(router.huggingface.co)로 이전됐고, all-MiniLM 같은 소형 모델은 무료 serverless로 안 뜨는 경우가 많다. <code class="inl">huggingface_hub</code>의 클라이언트가 <b>최신 라우팅을 대신</b> 처리한다.</p>
+            </div>
+            <div class="note">이미지 캡셔닝은 <code class="inl">client.image_to_text(image_bytes, model=...)</code>로 동일하게 매니지드 호출할 수 있다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 3부 6단계 /embed-managed 확인 -->
+  <section class="slide t-autumn-b" aria-label="3부 6단계 embed-managed 엔드포인트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 6단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/embed-managed</code> — <span class="accent">로컬과 비교</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 추가 (선택)</span></div>
+<pre class="dense"><span class="tok-kw">from</span> app <span class="tok-kw">import</span> hf_managed
+
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/embed-managed"</span>,
+           response_model=EmbedResponse)
+<span class="tok-kw">async def</span> <span class="tok-fn">create_embeddings_managed</span>(
+        req: EmbedRequest):
+    <span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+    vectors = <span class="tok-kw">await</span> hf_managed.embed_via_api(
+        req.texts)
+    dim = <span class="tok-fn">len</span>(vectors[<span class="tok-nm">0</span>]) <span class="tok-kw">if</span> vectors <span class="tok-kw">else</span> <span class="tok-nm">0</span>
+    <span class="tok-kw">return</span> EmbedResponse(
+        model=get_settings().embedding_model,
+        dim=dim, vectors=vectors)</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 호출</span></div>
+<pre class="dense"><span class="tok-cmd">curl</span> <span class="tok-fl">-s -X POST localhost:8000/embed-managed</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"texts":["docpilot","kubernetes"]}'</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">dim: 384</code> — 로컬 <code class="inl">/embed</code>와 <b>차원이 같다</b>. 같은 모델이면 로컬/매니지드 결과가 호환(week08에서 인덱싱·질의를 같은 모델로 맞추는 이유).</p>
+            </div>
+            <div class="note">무료 티어 모델은 첫 호출에서 콜드스타트로 <code class="inl">503 currently loading</code>이 날 수 있다 → 잠시 후 재시도.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 트러블슈팅 -->
+  <section class="slide t-autumn-b" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">막히면 <span class="accent">여기부터</span></h2>
+        <div class="card" style="max-width:min(97vw,1180px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:28%">증상</th><th style="width:30%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td class="em">최초 호출이 매우 느림</td><td>모델 다운로드/로딩</td><td>정상. 이후 캐시(<code>~/.cache/huggingface</code>)로 빨라짐. 컨테이너면 캐시 볼륨 마운트</td></tr>
+              <tr><td class="em"><code>torch</code> 설치 실패/무거움</td><td>플랫폼별 휠</td><td>CPU만 쓰면 OK. <code>pip install torch --index-url .../whl/cpu</code></td></tr>
+              <tr><td class="em">이미지 <code>cannot identify image file</code></td><td>실제 이미지가 아님/손상</td><td>진짜 jpg/png인지, <code>content_type</code> 헤더 확인</td></tr>
+              <tr><td class="em">ASR <code>ffmpeg not found</code></td><td>ffmpeg 미설치</td><td><code>apt-get install ffmpeg</code> / <code>brew install ffmpeg</code></td></tr>
+              <tr><td class="em">긴 오디오 뒷부분이 잘림</td><td>Whisper 기본 30초 창</td><td><code>chunk_length_s=30</code> + <code>return_timestamps=True</code></td></tr>
+              <tr><td class="em">Inference API <code>503 loading</code></td><td>매니지드 콜드스타트</td><td>수 초~수십 초 대기 후 재시도</td></tr>
+              <tr><td class="em">Inference API <code>401</code></td><td>토큰 없음/무효</td><td><code>.env</code>의 <code>HF_TOKEN</code>, <code>read</code> 권한 확인</td></tr>
+              <tr><td class="em">매번 모델 다시 로딩</td><td>함수 안에서 매번 생성</td><td><code>@lru_cache</code>로 파이프라인/모델 1회만 로딩했는지 확인</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 과제 + 체크리스트 -->
+  <section class="slide t-autumn-b" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / RAG로 가는 마지막 준비</div>
+        <h2 class="head">docpilot에 <span class="accent">감각과 기억</span> 붙이기</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">제출물 (커밋 + 실행 로그/스크린샷)</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.24rem,0.8vh,0.5rem)">
+              <li><span class="mk">1</span><span><b>필수</b> — <code class="inl">/embed</code> 동작 + 의미 비슷한 두 문장의 코사인 유사도가 무관한 문장보다 높음(수치 캡처)</span></li>
+              <li><span class="mk">2</span><span><b>필수</b> — 멀티모달(<code class="inl">/caption</code> 또는 <code class="inl">/transcribe</code>) 중 하나 구현·실제 입력 결과</span></li>
+              <li><span class="mk">3</span><span><b>도전</b> — 캡션(또는 전사)을 week06 <code class="inl">/chat</code>에 넣어 "한국어로 요약"하는 <code class="inl">/describe</code></span></li>
+              <li><span class="mk">4</span><span><b>도전</b> — 로컬(<code class="inl">/embed</code>) vs 매니지드(<code class="inl">/embed-managed</code>) 응답시간·차원·첫 5값 비교</span></li>
+              <li><span class="mk">5</span><span><b>분석</b> — 자체호스팅 vs 매니지드 표를 docpilot 관점(학교 서버 배포)으로 재작성</span></li>
+            </ul>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.22rem,0.75vh,0.48rem)">
+              <li><span class="mk">✓</span><span><code class="inl">sentence-transformers</code>·<code class="inl">transformers</code>·<code class="inl">torch</code>·<code class="inl">pillow</code> 설치·requirements 반영</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">.env</code>에 <code class="inl">HF_TOKEN</code>·모델명, <code class="inl">Settings</code>에 필드 추가</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">app/embeddings.py</code> 임베딩·코사인(모델 1회 로딩)</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">/embed</code> 동작, 의미 유사도 관찰</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">/caption</code> 또는 <code class="inl">/transcribe</code> 하나 이상 구현·확인</span></li>
+              <li><span class="mk">✓</span><span>(선택) <code class="inl">/embed-managed</code>로 매니지드 방식 체감</span></li>
+              <li><span class="mk">✓</span><span>자체호스팅 vs 매니지드 트레이드오프 설명 가능</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 다음 주 예고 -->
+  <section class="slide t-autumn-b" aria-label="다음 주 예고">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Next · Week 08 · Block 2 미니 과제</div>
+        <h2 class="head" style="font-size:var(--title-size)">다음 주 —<br/><span class="accent">RAG (검색증강생성)</span></h2>
+        <p class="hero-line" style="max-width:66ch">이번 주의 <b style="color:var(--ink)">임베딩</b>과 week06의 <b style="color:var(--ink)">LLM 생성</b>을 하나로 잇는다. 업로드 문서를 잘게 쪼개(청킹) 임베딩해 <b style="color:var(--ink)">벡터DB(Chroma)</b>에 저장하고, 질문이 오면 관련 조각을 검색해 LLM에 컨텍스트로 주입하는 <code class="inl">/ask</code>를 만든다.</p>
+        <div class="hero-evo" style="gap:0.6em">
+          <span class="chip">문서 청킹 · 임베딩 인덱싱</span>
+          <span class="chip">벡터DB Chroma</span>
+          <span class="chip"><code class="inl" style="background:none;color:var(--teal)">/ask</code> 검색증강 답변</span>
+        </div>
+        <p class="note">이번 주 <code class="inl">/embed</code>가 그 파이프라인의 <b>첫 부품</b>이 된다.</p>
+        <div class="hero-evo" style="margin-top:0.4em">
+          <span class="chip" style="border-color:var(--terracotta-deep)">W07 멀티모달 · HF 임베딩</span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--plum) 25%,var(--paper))">W08 RAG /ask</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
