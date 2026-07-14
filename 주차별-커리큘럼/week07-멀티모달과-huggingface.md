@@ -9,8 +9,8 @@
 
 ## 학습 목표
 
-- [ ] 멀티모달(이미지/음성/비전)의 개념과 대표 태스크(captioning, ASR)를 안다.
-- [ ] Hugging Face 생태계(Hub, `transformers`, Inference API, 임베딩 모델)를 이해한다.
+- [ ] 멀티모달(이미지/음성/비전)의 개념과 대표 태스크(captioning, ASR)를 예를 들어 설명할 수 있다.
+- [ ] Hugging Face 생태계(Hub, `transformers`, Inference API, 임베딩 모델)를 구성 요소별로 구분해 설명할 수 있다.
 - [ ] **자체호스팅(local transformers) vs 매니지드(Inference API)** 트레이드오프를 설명할 수 있다.
 - [ ] docpilot에 이미지 캡셔닝 **또는** 음성→텍스트 엔드포인트를 추가한다.
 - [ ] HF 임베딩 모델로 텍스트를 벡터로 변환하고 유사도를 계산한다(RAG 준비).
@@ -324,6 +324,8 @@ async def caption(file: UploadFile = File(...)) -> dict:
 
 ```bash
 # 아무 샘플 이미지 (또는 본인 이미지 사용)
+# 외부 URL은 언제든 사라질 수 있다(link rot). 아래 curl이 실패하거나 빈 파일이 받아지면
+# 로컬에 있는 아무 jpg/png(예: 강아지 사진)를 sample.jpg로 복사해 그대로 진행한다.
 curl -sL -o sample.jpg "https://huggingface.co/datasets/mishig/sample_images/resolve/main/dog.jpg"
 
 curl -s -X POST http://localhost:8000/caption \
@@ -370,7 +372,9 @@ def transcribe(audio_bytes: bytes, suffix: str = ".wav") -> str:
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
         tmp.write(audio_bytes)
         tmp.flush()
-        result = get_transcriber()(tmp.name)
+        # Whisper는 기본적으로 30초 창만 처리한다. 30초를 넘는 입력은 chunk_length_s로
+        # 잘게 나눠 넣고 return_timestamps=True로 조각을 이어붙여야 잘리거나 실패하지 않는다.
+        result = get_transcriber()(tmp.name, chunk_length_s=30, return_timestamps=True)
     return result["text"].strip()
 ```
 
@@ -381,7 +385,7 @@ def transcribe(audio_bytes: bytes, suffix: str = ".wav") -> str:
 import os
 from app import audio
 
-ALLOWED_AUDIO_TYPES = {"audio/wav", "audio/x-wav", "audio/mpeg", "audio/mp3", "audio/m4a", "audio/webm"}
+ALLOWED_AUDIO_TYPES = {"audio/wav", "audio/x-wav", "audio/flac", "audio/x-flac", "audio/mpeg", "audio/mp3", "audio/m4a", "audio/webm"}
 
 
 @app.post("/transcribe")
@@ -400,11 +404,12 @@ async def transcribe_audio(file: UploadFile = File(...)) -> dict:
 샘플 오디오로 호출:
 
 ```bash
-curl -sL -o sample.wav "https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/1.flac"
-# (flac도 ffmpeg가 있으면 처리된다. 확장자를 .flac로 맞춰도 됨)
+# 이 샘플은 실제로 flac 포맷이므로 확장자·MIME 타입을 flac로 맞춘다(ffmpeg 필요, 사전 준비 참고).
+# 외부 URL이 사라졌거나 다운로드가 실패하면, 로컬에 있는 아무 오디오 파일(.flac/.wav/.mp3 등)로 대체한다.
+curl -sL -o sample.flac "https://huggingface.co/datasets/Narsil/asr_dummy/resolve/main/1.flac"
 
 curl -s -X POST http://localhost:8000/transcribe \
-  -F "file=@sample.wav;type=audio/wav" | python -m json.tool
+  -F "file=@sample.flac;type=audio/flac" | python -m json.tool
 ```
 
 **확인**: `"text": "..."`에 받아쓴 문장이 담긴다.
@@ -423,39 +428,45 @@ curl -s -X POST http://localhost:8000/transcribe \
 # app/hf_managed.py
 from __future__ import annotations
 
-import httpx
+from huggingface_hub import AsyncInferenceClient
 
 from app.config import get_settings
 
-# Inference API base (모델별 경로)
-_BASE = "https://api-inference.huggingface.co/models"
+# 참고: 예전 serverless 엔드포인트(api-inference.huggingface.co/models/...)는
+# 현재 Inference Providers(router.huggingface.co)로 이전됐고, all-MiniLM 같은
+# 소형 모델은 무료 serverless로 안 뜨는 경우가 많다. 직접 URL을 치지 말고
+# huggingface_hub의 InferenceClient가 최신 라우팅을 대신 처리하게 한다.
+# (배포 전 https://huggingface.co/docs/huggingface_hub 에서 현행 사용법 재확인 권장)
 
 
-def _headers() -> dict[str, str]:
+def _client() -> AsyncInferenceClient:
     settings = get_settings()
     if not settings.hf_token:
         raise RuntimeError("HF_TOKEN is required for the Inference API")
-    return {"Authorization": f"Bearer {settings.hf_token}"}
+    return AsyncInferenceClient(token=settings.hf_token)
 
 
 async def embed_via_api(texts: list[str]) -> list[list[float]]:
-    """feature-extraction 파이프라인으로 임베딩을 받는다."""
+    """feature-extraction으로 문장 임베딩을 받는다.
+
+    무료 티어에서 특정 모델이 안 뜨면 404/`model not deployed`가 날 수 있다.
+    그럴 땐 config의 embedding_model을 배포 가능한 모델로 교체한다.
+    """
     settings = get_settings()
-    url = f"{_BASE}/{settings.embedding_model}/pipeline/feature-extraction"
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(url, headers=_headers(), json={"inputs": texts})
-        r.raise_for_status()
-        return r.json()  # [[...], [...]] (문장별 벡터)
+    client = _client()
+    vectors: list[list[float]] = []
+    for text in texts:
+        vec = await client.feature_extraction(text, model=settings.embedding_model)
+        vectors.append(vec.tolist())  # numpy 배열 → list[float]
+    return vectors
 
 
 async def caption_via_api(image_bytes: bytes) -> str:
-    """이미지를 그대로 바디에 실어 캡션을 받는다."""
+    """이미지 바이트로 캡션을 받는다."""
     settings = get_settings()
-    url = f"{_BASE}/{settings.caption_model}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(url, headers=_headers(), content=image_bytes)
-        r.raise_for_status()
-        return r.json()[0]["generated_text"].strip()
+    client = _client()
+    out = await client.image_to_text(image_bytes, model=settings.caption_model)
+    return out.generated_text.strip()
 ```
 
 `app/main.py`에 확인용 엔드포인트 추가(선택):
@@ -495,6 +506,7 @@ curl -s -X POST http://localhost:8000/embed-managed \
 | `torch` 설치 실패/무거움 | 플랫폼별 휠 | CPU만 쓰면 그대로 OK. 그래도 무거우면 `pip install torch --index-url https://download.pytorch.org/whl/cpu` |
 | 이미지 `cannot identify image file` | 실제 이미지가 아님/손상 | 파일이 진짜 jpg/png인지 확인. `content_type` 헤더 확인 |
 | ASR에서 `ffmpeg not found` | ffmpeg 미설치 | `apt-get install ffmpeg` / `brew install ffmpeg` |
+| ASR이 30초 넘는 오디오에서 뒷부분이 잘리거나 실패 | Whisper 기본은 30초 창만 처리 | 파이프라인 호출에 `chunk_length_s=30`(긴 입력 청킹) 또는 `return_timestamps=True` 추가(본 문서 `transcribe` 참고) |
 | Inference API 503 `loading` | 매니지드 모델 콜드스타트 | 수 초~수십 초 대기 후 재시도 |
 | Inference API 401 | 토큰 없음/무효 | `.env`의 `HF_TOKEN` 확인, `read` 권한 토큰인지 확인 |
 | `OutOfMemory`/프로세스 강제종료 | RAM 부족(대형 모델) | 더 작은 모델 사용(`whisper-base`, `MiniLM`), 배치 크기 축소 |

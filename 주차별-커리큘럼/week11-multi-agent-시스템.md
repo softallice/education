@@ -13,8 +13,9 @@
 
 ## 사전 준비
 
-- **지난주 산출물**: week09 단일 Agent(`/agent`, function/tool calling, ReAct 루프), week10 실제 도구·MCP 연동. week08의 RAG 검색(`/ask` 뒤에서 도는 벡터DB 검색 함수).
+- **지난주 산출물**: week09 단일 Agent(`/agent`, function/tool calling, ReAct 루프), week10 실제 도구·MCP 연동. week08의 RAG 검색(`app/vectorstore.py`의 `search`, `from app.vectorstore import search`로 재사용).
 - **필요 도구·계정**: Python 3.12, OpenAI API 키(`OPENAI_API_KEY`). week08에서 만든 벡터DB(Chroma 또는 pgvector)에 문서가 이미 인덱싱되어 있어야 한다.
+- **키 로딩**: `.env` + `get_settings()`를 기준으로 한다. 아래 shell `export`를 써도 python-dotenv가 `.env`를 읽어 호환된다.
 - **디렉터리**: 지금까지의 `docpilot/` 프로젝트. 이번 주는 `app/agents/` 아래에 파일을 추가한다.
 
 ```bash
@@ -153,25 +154,18 @@ class ReportState:
 """researcher 에이전트가 사용하는 도구들. week08 RAG + week10 tools를 재사용."""
 from __future__ import annotations
 
-# --- week08에서 만든 벡터DB 검색을 재사용한다 ---
-# week08 구현에 맞춰 import 경로만 맞추면 된다. 예시:
-try:
-    from app.rag.retriever import retrieve as _vector_retrieve  # week08 산출물
-except Exception:  # week08 모듈이 없을 때를 대비한 폴백(수업용 더미)
-    def _vector_retrieve(query: str, k: int = 4) -> list[dict]:
-        return [
-            {"text": f"(demo) '{query}' 관련 문서 내용 조각 {i}", "source": f"doc_{i}.md"}
-            for i in range(1, k + 1)
-        ]
+# --- week08에서 만든 벡터DB 검색(app/vectorstore.py의 search)을 재사용한다 ---
+# 재사용은 항상 이 경로로 통일한다(week09~11 공통). 더미 fallback에 의존하지 않는다.
+from app.vectorstore import search as _vector_search  # week08 산출물
 
 
 def rag_search(query: str, k: int = 4) -> list[dict]:
     """docpilot 벡터DB에서 query와 유사한 문서 조각 k개를 검색한다.
 
-    Returns: [{"text": str, "source": str}, ...]
+    Returns: [{"text": str, "source": str, "score": float}, ...]
     """
-    hits = _vector_retrieve(query, k=k)
-    # week08 반환 형식이 다르면 여기서 정규화한다.
+    hits = _vector_search(query, top_k=k)
+    # week08 search는 이미 list[dict](keys: text, source, score)를 반환한다.
     return [{"text": h["text"], "source": h.get("source", "unknown")} for h in hits]
 
 
@@ -221,7 +215,7 @@ TOOL_SCHEMAS = [
 TOOL_IMPL = {"rag_search": rag_search, "keyword_lookup": keyword_lookup}
 ```
 
-**확인**: `python -c "from app.agents.tools import rag_search; print(rag_search('agent', k=2))"` 실행 시 조각 2개가 담긴 리스트가 출력된다(week08 미구현이면 `(demo)` 더미가 나온다).
+**확인**: `python -c "from app.agents.tools import rag_search; print(rag_search('agent', k=2))"` 실행 시 조각 2개가 담긴 리스트가 출력된다(week08을 먼저 완료해 문서가 인덱싱되어 있어야 실제 조각이 나온다).
 
 ---
 
@@ -287,7 +281,22 @@ def run_researcher(state: ReportState) -> None:
             return
 
         # (b) 도구 호출이 있으면 실행해 결과를 되먹인다
-        messages.append(choice)  # assistant의 tool_calls 메시지 보존
+        # week09와 동일하게 tool_calls를 dict로 재구성해 보존한다(SDK 객체 직접 append 금지).
+        messages.append({
+            "role": "assistant",
+            "content": choice.content,
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    },
+                }
+                for call in choice.tool_calls
+            ],
+        })
         for call in choice.tool_calls:
             name = call.function.name
             args = json.loads(call.function.arguments or "{}")
@@ -518,15 +527,17 @@ curl -s -X POST http://localhost:8000/report \
 
 ---
 
-## 3부 · LangGraph 버전 + 실패 복구/HITL
+## 3부 · LangGraph 버전 + 실패 복구/HITL — **선택/도전**
+
+> **선택/도전**: 필수 경로는 2부(raw 오케스트레이션 `/report`)에서 끝난다. 실패 복구·HITL은 2부 5단계에서 이미 raw로 시연했다. 이 3부는 같은 워크플로우를 프레임워크로 다시 짜 비교하는 심화이며, 단일 세션 부담을 줄이려면 건너뛰어도 무방하다.
 
 같은 워크플로우를 **LangGraph**로 재구성한다. 상태를 `TypedDict`로 선언하고, 각 에이전트를 노드로, 순서를 엣지로 표현한다. 조건부 엣지로 HITL 분기를 넣는다.
 
 ### 7단계. LangGraph 설치
 
 ```bash
-# 무엇을/왜: 그래프 오케스트레이션 프레임워크 설치
-pip install langgraph
+# 무엇을/왜: 그래프 오케스트레이션 프레임워크 설치 (week09와 동일 버전 핀)
+pip install "langgraph>=0.2"
 python -c "import langgraph; print('langgraph', langgraph.__version__)"
 ```
 
@@ -570,9 +581,9 @@ def researcher_node(gs: GraphState) -> GraphState:
     st = _to_report_state(gs)
     try:
         run_researcher(st)
-    except Exception as exc:
+    except Exception:
+        # 수집 실패 시 순수 RAG 검색 결과로 폴백한다(ReportState.log에 이미 기록됨).
         from app.agents.researcher import _rag_fallback
-        st.emit_error = str(exc)  # 참고용
         _rag_fallback(st)
     return {
         **gs,
@@ -665,7 +676,7 @@ curl -s -X POST http://localhost:8000/report/graph \
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| `ModuleNotFoundError: app.rag.retriever` | week08 RAG 모듈 경로가 다름 | `tools.py`의 import 경로를 실제 week08 모듈에 맞추거나, 폴백 더미로 먼저 흐름 검증 |
+| `ImportError`/빈 검색 결과 (`app.vectorstore.search`) | week08 미완성·미인덱싱, 또는 import 경로 오타 | `from app.vectorstore import search`로 통일하고 week08 인덱싱(문서 저장)을 먼저 완료 |
 | researcher가 도구를 안 부르고 바로 JSON을 냄 | 프롬프트가 도구 사용을 강제하지 않음 | SYSTEM에 "Prefer rag_search first" 강화, 또는 첫 턴 `tool_choice={"type":"function","function":{"name":"rag_search"}}` 로 강제 |
 | 무한 tool-calling / 비용 폭증 | 종료 조건 부재 | `MAX_TOOL_TURNS` 상한 유지, 도달 시 `_rag_fallback`으로 마무리(이미 구현됨) |
 | `_parse_findings`가 빈 리스트 반환 | 모델이 코드펜스/설명을 섞어 응답 | `removeprefix('```json')` 유지 + `response_format={"type":"json_object"}` 옵션 추가 |
@@ -676,7 +687,9 @@ curl -s -X POST http://localhost:8000/report/graph \
 
 ---
 
-## 이번 주 과제
+## 이번 주 과제 (블록 3 미니 과제)
+
+> ⚠️ **블록 3 미니 과제**: week11(Multi-Agent) 종료 시점이 블록 3(AI Agent)의 피날레다. week09(단일 Agent) → week10(Agentic) → week11(Multi-Agent)에서 만든 부품을 하나의 협업 워크플로우로 조립한 결과물을 이 과제로 제출한다. 블록 3 평가는 이 결과물을 기준으로 한다.
 
 **`reviewer` 에이전트를 추가해 3-에이전트 협업으로 확장한다.**
 
@@ -686,11 +699,11 @@ curl -s -X POST http://localhost:8000/report/graph \
    - 문제점(근거 없는 문장, 누락된 출처)을 목록으로 반환한다.
 2. 오케스트레이터를 `researcher → writer → reviewer` 순으로 확장하고,
    - reviewer가 "수정 필요"를 반환하면 **writer를 1회 재호출**(피드백 반영)하는 루프를 넣는다(최대 2회).
-3. LangGraph 버전에도 `review` 노드와 **조건부 엣지**(review → write 재작성 or → END)를 추가한다.
-4. `/report` 응답에 `review` 결과(통과/수정사항)를 포함한다.
+3. `/report` 응답에 `review` 결과(통과/수정사항)를 포함한다.
+4. **(선택/도전)** LangGraph 버전에도 `review` 노드와 **조건부 엣지**(review → write 재작성 or → END)를 추가한다. (3부가 선택/도전이므로 이 항목도 선택이다.)
 
 **제출물**:
-- `app/agents/reviewer.py` + 수정된 `orchestrator.py`, `graph_report.py`, `main.py`
+- `app/agents/reviewer.py` + 수정된 `orchestrator.py`, `main.py` (`graph_report.py`는 선택/도전)
 - `curl`로 `/report` 호출한 요청/응답 로그(협업 로그 `log` 포함)를 담은 `week11-과제.md`
 - 재작성 루프가 동작한 사례(reviewer 지적 → writer 수정) 로그 캡처 1건
 
@@ -702,7 +715,7 @@ curl -s -X POST http://localhost:8000/report/graph \
 - [ ] researcher가 week08 RAG + 도구를 tool-calling 루프로 사용한다.
 - [ ] writer가 findings만 근거로 보고서를 작성한다(환각 억제 프롬프트 포함).
 - [ ] 오케스트레이터가 실패 복구(폴백)와 HITL 게이트를 갖췄다.
-- [ ] `/report`(raw)와 `/report/graph`(LangGraph) 두 엔드포인트가 동작한다.
+- [ ] `/report`(raw) 엔드포인트가 동작한다. (선택/도전: `/report/graph` LangGraph 버전)
 - [ ] 에이전트 간 협업 로그를 콘솔·응답에서 관찰했다.
 - [ ] (과제) reviewer 에이전트로 3-에이전트 협업 + 재작성 루프를 구현했다.
 

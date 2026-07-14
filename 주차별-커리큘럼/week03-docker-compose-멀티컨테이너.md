@@ -127,6 +127,16 @@ def init_db() -> None:
 
 > `postgresql+psycopg://` 스킴이 psycopg 3 드라이버를 지정한다. 사용자/비밀번호/호스트/포트/DB이름 순서다.
 
+> ⚠️ **Dockerfile 갱신 (필수)**: week02 Dockerfile은 `COPY main.py .` 한 줄만 있다. 방금 `db.py`가 새로 생겼으므로 Dockerfile에도 복사 지시를 추가해야 한다. 빠뜨리면 아래 6단계 `docker compose up --build` 시 이미지에 `db.py`가 없어 컨테이너가 `ModuleNotFoundError: No module named 'db'`로 즉시 죽는다(`web-1` CrashLoop).
+>
+> ```dockerfile
+> # Dockerfile — week02 파일에서 아래 한 줄 추가
+> COPY main.py .
+> COPY db.py .        # ← week03에서 추가
+> ```
+>
+> **확인**: `grep db.py Dockerfile` 로 줄이 있으면 OK.
+
 #### 3단계. main.py 확장 (/documents 추가)
 
 `main.py`를 아래 완결본으로 교체한다. 1주차의 `/`·`/health`는 그대로 두고, 문서 메타 업로드·목록·단건 조회를 추가한다.
@@ -366,7 +376,7 @@ curl http://127.0.0.1:8000/documents   # []  (빈 배열 — 데이터 사라짐
 
 ```bash
 docker compose down               # 스택 정지
-git add main.py db.py requirements.txt docker-compose.yml
+git add Dockerfile main.py db.py requirements.txt docker-compose.yml
 git commit -m "feat: docpilot week03 compose(web+postgres) + /documents 메타 저장"
 git push
 ```

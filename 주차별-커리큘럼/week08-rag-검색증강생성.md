@@ -216,6 +216,9 @@ def add_chunks(doc_id: str, chunks: list[str], source: str) -> int:
     return len(chunks)
 
 
+# 앵커: 이 search를 week09~11에서 그대로 "도구(tool)"로 재사용한다.
+#       재사용은 항상 `from app.vectorstore import search`로 통일하며,
+#       반환형은 list[dict](keys: text, source, score)가 표준 검색 인터페이스다.
 def search(query: str, top_k: int | None = None) -> list[dict]:
     """질문을 임베딩해 가장 가까운 조각 top_k를 반환."""
     settings = get_settings()

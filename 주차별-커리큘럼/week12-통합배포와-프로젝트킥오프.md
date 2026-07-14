@@ -90,47 +90,59 @@ docpilot이 클라우드 네이티브 원칙을 지키는지 표로 되짚는다
 
 ### 1단계. 의존성·설정 정리 (12요소 III)
 
-먼저 코드가 **모든 설정을 환경변수에서** 읽는지 확인한다. `app/config.py`(없으면 생성):
+코드가 **모든 설정을 환경변수에서** 읽는지 확인한다. 설정 모듈은 이미 [week06](./week06-llm-api-연동.md)에서 `app/config.py`(`pydantic-settings` 기반 `Settings` + `get_settings()`)로 만들었고 week07·week08에서 필드(`embedding_model`, `caption_model`, `chroma_dir` 등)를 계속 추가했다.
 
-```python
-"""docpilot 런타임 설정 — 전부 환경변수에서 읽는다(12-Factor III)."""
-import os
+> ⚠️ **여기서 `app/config.py`를 새로 만들지 말 것.** 평범한 `os.environ` 버전으로 덮어쓰면 week06~08에서 쌓은 필드가 전부 사라져 `app.llm`·`app.rag` 등의 import가 붕괴한다. 통합 배포 단계에서는 **기존 파일을 재사용**하고 아래 두 가지만 점검한다.
 
+- `openai_api_key`가 **필수**(기본값 없음)로 선언되어 키가 없으면 기동 시점에 즉시 실패(fail-fast)하는가.
+- `database_url` 기본값이 컨테이너 네트워크 기준(`...@postgres:5432/...`)인가. 아니라면 배포 매니페스트에서 `DATABASE_URL`을 환경변수로 주입한다.
 
-class Settings:
-    openai_api_key: str = os.environ["OPENAI_API_KEY"]          # 필수: 없으면 기동 실패
-    database_url: str = os.environ.get(
-        "DATABASE_URL", "postgresql://docpilot:docpilot@postgres:5432/docpilot"
-    )
-    model: str = os.environ.get("DOCPILOT_MODEL", "gpt-4o-mini")
-    log_level: str = os.environ.get("LOG_LEVEL", "INFO")
+> 핵심: API 키는 없으면 **기동 시점에 즉시 실패**해야 한다(fail-fast). 비밀을 코드에 하드코딩하지 않고 K8s Secret/환경변수로 주입한다([week05](./week05-kubernetes-심화와-배포.md) ConfigMap/Secret 참고).
 
-
-settings = Settings()
-```
-
-> 핵심: `os.environ["OPENAI_API_KEY"]`는 키가 없으면 **기동 시점에 즉시 실패**한다(fail-fast). 비밀을 코드에 하드코딩하지 않는다.
-
-**확인**: `python -c "from app.config import settings; print(settings.model)"` 실행 시(키가 있으면) `gpt-4o-mini`가 출력된다.
+**확인**: `python -c "from app.config import get_settings; get_settings(); print('config OK')"` 실행 시(필수 키가 있으면) `config OK`가 출력된다.
 
 ### 2단계. requirements 고정
 
 `requirements.txt`가 11주까지의 의존성을 모두 담는지 확인한다.
 
+`requirements.txt`는 **week01~11에서 실제로 import한 패키지를 모두** 담아야 한다. 하나라도 빠지면 배포된 컨테이너가 `ModuleNotFoundError`로 죽고, 특히 아래 5단계 스모크 테스트의 `/ask`(RAG)·`/agent`가 실패한다.
+
 ```text
+# --- 코어 (week01~06) ---
 fastapi
 uvicorn[standard]
+python-multipart
 openai
-langgraph
+google-genai          # week06 Gemini 옵션
+pydantic-settings     # week06 app/config.py (Settings)
+python-dotenv         # .env 로딩
+
+# --- 데이터/RAG (week03·08) ---
 psycopg[binary]
 pgvector
-python-multipart
+chromadb              # week08 벡터 저장소(택1: pgvector 또는 chroma)
+pypdf                 # 문서 파싱
+
+# --- 에이전트 (week09~11) ---
+langgraph
+langchain-openai
+mcp                   # week10 MCP 서버/클라이언트
+tenacity              # 재시도 백오프
+
+# --- 멀티모달 (week07): 로컬 모델 경로를 쓸 때만 ---
+# 매니지드(HF Inference/OpenAI) 경로만 쓰면 아래 3줄은 생략해 이미지를 가볍게 유지.
+huggingface_hub       # 매니지드 경로(AsyncInferenceClient)
+pillow                # 이미지 처리
+# transformers        # 로컬 캡션/ASR 모델 (torch 동반, 이미지 수 GB)
+# torch               # 로컬 추론 (CPU 휠도 큼)
 ```
+
+> 재현성을 위해 최종적으로는 실제 설치 환경에서 `pip freeze > requirements.txt`로 버전을 고정하는 것을 권장한다. 위 목록은 팀이 선택한 경로(로컬 vs 매니지드)에 맞춰 가감한다.
 
 ```bash
 # 무엇을/왜: 로컬에서 의존성이 실제로 설치·임포트되는지 검증
 pip install -r requirements.txt
-python -c "import fastapi, openai, langgraph, psycopg; print('deps OK')"
+python -c "import fastapi, openai, langgraph, psycopg, chromadb, mcp; print('deps OK')"
 ```
 
 **확인**: `deps OK` 가 출력된다.
@@ -156,6 +168,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 앱 소스 복사
 COPY app ./app
+# ⚠️ week09~10에서 agent/·mcp_server/ 등을 app/ 밖 최상위 패키지로 두었다면
+#    그 디렉터리도 반드시 복사해야 한다(안 그러면 /agent·/documents가 죽는다). 예:
+# COPY agent ./agent
+# COPY mcp_server ./mcp_server
+#    권장: week06 구조 전환 때처럼 모든 소스를 app/ 하위로 모으면 이 줄들이 불필요하다.
 
 # 비루트 유저로 실행(보안)
 RUN useradd -m appuser
@@ -590,7 +607,7 @@ kill %1 2>/dev/null || true          # port-forward 종료
 
 ### 1. 팀 편성
 
-- 팀 규모는 수강 인원에 맞춰 조정(권장 2~4명).
+- 팀 규모는 수강 인원에 맞춰 조정(권장 3~4명).
 - 역할을 미리 나눈다: **백엔드/배포**(K8s·CI), **AI/Agent**(LLM·RAG·Multi-Agent), **프론트/문서·발표**. week11 Multi-Agent처럼 사람도 역할 분담이 협업의 핵심이다.
 
 ### 2. 주제 선정

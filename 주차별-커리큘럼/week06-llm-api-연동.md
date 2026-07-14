@@ -10,7 +10,7 @@
 ## 학습 목표
 
 - [ ] LLM API의 동작 원리(인증 → 요청 → 응답, 토큰·비용, 스트리밍)를 설명할 수 있다.
-- [ ] system / user / assistant 역할과 `temperature` 등 핵심 파라미터의 효과를 안다.
+- [ ] system / user / assistant 역할과 `temperature` 등 핵심 파라미터의 효과를 예를 들어 설명할 수 있다.
 - [ ] API 키를 **환경변수**로 안전하게 로드한다(하드코딩 금지).
 - [ ] docpilot에 `/chat` 엔드포인트를 추가해 OpenAI를 호출한다.
 - [ ] `StreamingResponse`(SSE)로 토큰을 실시간으로 흘려보낸다.
@@ -20,8 +20,25 @@
 
 ## 사전 준비
 
-- 지난주(week05)까지의 docpilot 코드베이스. 최소한 `app/main.py`가 있고 `uvicorn app.main:app --reload`로 실행되는 상태.
+- 지난주(week05)까지의 docpilot 코드베이스(프로젝트 루트의 `main.py`·`db.py`).
   - 아직 없다면 [week01](./week01-오리엔테이션과-클라우드네이티브개론.md)~[week05](./week05-kubernetes-심화와-배포.md)를 먼저 완료할 것.
+
+> **⚠️ 0단계 — 프로젝트 구조 전환 (이번 주 최초 1회만)**
+>
+> week05까지는 루트에 `main.py`·`db.py`를 두었다. week06부터 파일이 빠르게 늘어나므로(설정·LLM·RAG·에이전트) `app/` 패키지로 승격한다. **이 전환을 하지 않으면 이후 모든 주차의 `from app.xxx import ...`가 실패한다.**
+>
+> ```bash
+> cd ~/projects/docpilot
+> mkdir -p app && touch app/__init__.py
+> git mv main.py app/main.py        # 루트 main.py → app/main.py
+> git mv db.py app/db.py            # 루트 db.py → app/db.py
+> # app/main.py 안의 `from db import ...` 를 `from app.db import ...` 로 수정
+> sed -i 's/^from db import/from app.db import/' app/main.py
+> ```
+>
+> Dockerfile도 `COPY main.py .` / `COPY db.py .` 두 줄을 `COPY app ./app` 한 줄로 바꾼다(최종 정리는 [week12](./week12-통합배포와-프로젝트킥오프.md)에서). CI 워크플로우가 있다면 트리거 `paths`도 `app/**` 로 맞춘다.
+>
+> **확인**: `uvicorn app.main:app --reload` 로 서버가 뜨고 다른 터미널에서 `curl -s localhost:8000/health` 가 `{"status":"ok"}`(week01 정의값)를 반환하면 전환 완료. 이제부터 실행 명령은 항상 `uvicorn app.main:app` 이다.
 - Python 3.12, 가상환경(venv 또는 uv).
 - **OpenAI API 키** 1개. ([platform.openai.com](https://platform.openai.com) → API keys → Create). 최초 가입 시 소액 크레딧이 있거나, 결제 수단 등록 후 소액($5) 충전이면 이 실습에 충분하다.
 - (선택) **Gemini API 키**: [aistudio.google.com](https://aistudio.google.com) → Get API key (무료 티어 있음).
@@ -97,7 +114,7 @@ LLM(Large Language Model)은 "지금까지의 대화"를 입력받아 "다음에
 
 ```bash
 # 가상환경이 활성화된 상태에서
-pip install "openai>=1.40" "google-genai>=0.3" "pydantic-settings>=2.0" "python-dotenv>=1.0" "sse-starlette>=2.0"
+pip install "openai>=1.40" "google-genai>=1.0" "pydantic-settings>=2.0" "python-dotenv>=1.0" "sse-starlette>=2.0"
 ```
 
 `requirements.txt`에도 추가한다(컨테이너 재빌드 시 반영되도록).
@@ -105,7 +122,7 @@ pip install "openai>=1.40" "google-genai>=0.3" "pydantic-settings>=2.0" "python-
 ```text
 # requirements.txt (기존 항목 + 아래 추가)
 openai>=1.40
-google-genai>=0.3
+google-genai>=1.0
 pydantic-settings>=2.0
 python-dotenv>=1.0
 sse-starlette>=2.0
@@ -132,7 +149,7 @@ OPENAI_MODEL=gpt-4o-mini
 
 # (선택) Gemini
 GEMINI_API_KEY=...여기에_본인_키...
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 
 # 프로바이더 선택: openai | gemini | ollama
 LLM_PROVIDER=openai
@@ -169,7 +186,7 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.0-flash"
 
     # Ollama (local, free)
     ollama_host: str = "http://localhost:11434"
@@ -574,7 +591,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 ```bash
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=...본인_키...
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
 서버 재시작 후 동일하게 호출:

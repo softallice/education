@@ -19,11 +19,11 @@ week03 Compose ─▶ week04 K8s 배포(하드코딩) ─▶ [week05] 운영형 
 - [ ] 설정을 코드/이미지에서 분리해야 하는 이유(12-Factor의 config)를 설명할 수 있다.
 - [ ] ConfigMap(비밀 아님)과 Secret(민감정보)을 구분해 사용할 수 있다.
 - [ ] liveness / readiness probe의 차이를 알고 `/health`에 연결할 수 있다.
-- [ ] resources requests/limits를 설정하고, 그것이 HPA의 전제임을 안다.
+- [ ] resources requests/limits를 설정하고, 그것이 HPA 사용률 계산의 전제인 이유를 설명할 수 있다.
 - [ ] HPA로 CPU 부하에 따라 Pod가 자동으로 늘고 주는 것을 관찰할 수 있다.
 - [ ] Ingress로 docpilot을 도메인으로 노출할 수 있다.
 - [ ] `kubectl rollout`으로 무중단 롤아웃/롤백을 수행할 수 있다.
-- [ ] GitHub Actions로 이미지를 빌드·푸시하는 워크플로우를 이해한다.
+- [ ] GitHub Actions로 이미지를 빌드·푸시하는 워크플로우를 작성하고 실행 결과를 설명할 수 있다.
 
 ---
 
@@ -497,7 +497,9 @@ on:
   push:
     branches: ["main"]
     paths:
-      - "app/**"
+      # week05 시점 레이아웃은 루트에 main.py/db.py가 있다. week06에서 app/로 승격하면 이 paths도 app/** 로 바꾼다.
+      - "main.py"
+      - "db.py"
       - "Dockerfile"
       - "requirements.txt"
       - ".github/workflows/docker-build.yml"
