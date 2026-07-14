@@ -1,0 +1,1552 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 12 — 통합 배포 & 몰입형 프로젝트 킥오프</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01~11 덱과 동일한 디자인 시스템 계승 (12주 피날레)
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이 (피날레: 가을 만개)
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+/* 가을 피날레 (만개: 테라코타 · 플럼 · 오커) */
+.t-finale    { --wash-a: rgba(185,106,68,0.55);  --wash-b: rgba(158,114,144,0.5);  --ribbon-a: var(--terracotta-deep); --ribbon-b: var(--plum-deep); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+.t-finale                { --accent: var(--terracotta-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+.motif--branch { top: clamp(-30px,-2vw,-10px); left: clamp(-40px,-3vw,-20px); width: clamp(160px,24vw,360px); color: var(--terracotta); opacity: 0.32; }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 코드 블록 조밀 변형 (긴 코드 대응) */
+.code pre.dense { font-size: clamp(0.6rem, 0.98vw, 0.86rem); line-height: 1.5; }
+.code pre.xdense { font-size: clamp(0.54rem, 0.88vw, 0.78rem); line-height: 1.45; }
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+.tok-yk { color: #F2C572; }  /* yaml key */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* 파이프라인 흐름 (개념 개요) */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; font-family: var(--font-mono); font-size: var(--small-size); }
+.flow .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.75em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.flow .st.now { background: color-mix(in srgb, var(--terracotta) 26%, var(--paper)); color: var(--ink); font-weight: 800; border-color: var(--terracotta-deep); }
+.flow .st.fin { background: color-mix(in srgb, var(--sage) 30%, var(--paper)); color: var(--ink); font-weight: 700; }
+.flow .ar { color: var(--accent); font-weight: 800; }
+
+/* 도구/스텝 스트립 */
+.reqstrip { display: flex; flex-wrap: wrap; gap: 5px; }
+.reqstrip span {
+  font-family: var(--font-mono); font-size: var(--micro-size); font-weight: 800;
+  padding: 0.2em 0.5em; border-radius: 6px;
+  background: color-mix(in srgb, var(--terracotta) 32%, var(--paper)); color: var(--terracotta-deep);
+  border: 1px solid color-mix(in srgb, var(--terracotta-deep) 38%, transparent);
+}
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+/* K8s 통합 배포 구성도 (Ingress → Service → Deployment ...) */
+.k8s { display:flex; flex-direction:column; gap: clamp(0.4rem,1vw,0.7rem); font-family: var(--font-mono); font-size: var(--small-size); }
+.k8s .ns {
+  border: 1.5px dashed color-mix(in srgb, var(--terracotta-deep) 50%, transparent);
+  border-radius: var(--radius);
+  padding: clamp(0.6rem,1.4vw,1.1rem);
+  background: color-mix(in srgb, var(--terracotta) 8%, var(--paper));
+  display:flex; flex-direction:column; gap: clamp(0.4rem,1vw,0.7rem);
+}
+.k8s .ns-lbl { font-size: var(--micro-size); color: var(--terracotta-deep); font-weight:800; letter-spacing:0.03em; }
+.k8s .node { background: var(--paper); border:1px solid rgba(120,78,46,0.15); border-radius:10px; padding:0.4em 0.85em; box-shadow: var(--shadow-soft); color: var(--ink-soft); text-align:center; }
+.k8s .node.web { background: color-mix(in srgb, var(--terracotta) 24%, var(--paper)); color: var(--ink); font-weight:800; border-color: var(--terracotta-deep); }
+.k8s .node.db { background: color-mix(in srgb, var(--sage) 28%, var(--paper)); color: var(--ink); font-weight:700; }
+.k8s .node.sec { background: color-mix(in srgb, var(--plum) 26%, var(--paper)); color: var(--ink); font-weight:700; }
+.k8s .row { display:flex; flex-wrap:wrap; align-items:center; gap:0.45em; justify-content:center; }
+.k8s .ar { color: var(--accent); font-weight:800; }
+.k8s .ext { text-align:center; font-size: var(--micro-size); color: var(--ink-faint); font-weight:700; }
+
+/* 여정 회고 타임라인 (12주) */
+.journey { display:flex; flex-direction:column; gap: clamp(0.4rem,1.1vh,0.8rem); }
+.journey .blk { display:flex; align-items:center; gap:0.7em; }
+.journey .tag {
+  flex:none; font-family: var(--font-mono); font-weight:800; font-size: var(--micro-size);
+  padding:0.3em 0.7em; border-radius:8px; min-width: 8.5em; text-align:center;
+}
+.journey .b1 .tag { background: color-mix(in srgb,var(--yellow) 45%,var(--paper)); color: var(--terracotta-deep); border:1px solid color-mix(in srgb,var(--ochre) 45%,transparent); }
+.journey .b2 .tag { background: color-mix(in srgb,var(--coral) 32%,var(--paper)); color: var(--coral-deep); border:1px solid color-mix(in srgb,var(--coral-deep) 40%,transparent); }
+.journey .b3 .tag { background: color-mix(in srgb,var(--plum) 30%,var(--paper)); color: var(--plum-deep); border:1px solid color-mix(in srgb,var(--plum-deep) 40%,transparent); }
+.journey .bf .tag { background: color-mix(in srgb,var(--terracotta) 34%,var(--paper)); color: var(--terracotta-deep); border:1px solid var(--terracotta-deep); }
+.journey .desc { font-size: var(--small-size); color: var(--ink-soft); line-height:1.4; }
+.journey .desc b { color: var(--ink); }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .nav-dots { display: none; }
+  .journey .blk { align-items:flex-start; flex-direction:column; gap:0.2em; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 12</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">24</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-finale" aria-label="타이틀">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.44" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <svg class="motif motif--branch float-motif" style="--mo:0.3" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M30 30C60 60 60 100 40 140C70 120 110 120 150 150C120 110 120 70 150 40C110 60 70 60 30 30Z"/></svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · 피날레</span>
+      <div class="eyebrow">Week 12 — 통합 배포 & 몰입형 프로젝트 킥오프</div>
+      <h1 class="title">피날레 —<br/><span style="color:var(--accent)">통합 배포 &amp; 몰입형 프로젝트</span></h1>
+      <p class="hero-line">11주 동안 자란 docpilot <b style="color:var(--ink)">전체</b>(웹 + DB + 벡터DB + LLM + Agent)를 하나의 클러스터에 <b style="color:var(--ink)">통합 배포</b>하고, 관측성·키 관리를 점검한 뒤 <b style="color:var(--ink)">4주 몰입형 프로젝트</b>를 시작한다. 12주 강의의 마지막.</p>
+      <div class="hero-evo">
+        <span class="chip">W11 Multi-Agent <code class="inl" style="background:none;color:var(--teal)">/report</code></span>
+        <span class="arrow">→</span>
+        <span class="chip">W12 <code class="inl" style="background:none;color:var(--teal)">docpilot 전체</code> K8s 통합 배포 · 킥오프</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-finale" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.34" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:98ch">
+          <li><span class="mk">1</span><span>docpilot 전체 스택을 하나의 이미지로 컨테이너화하고 <b>K8s에 통합 배포</b>한다.</span></li>
+          <li><span class="mk">2</span><span><b>Secret</b>으로 API 키를 안전하게 주입하고, <b>ConfigMap</b>으로 설정을 외부화한다(12요소 재점검).</span></li>
+          <li><span class="mk">3</span><span>liveness/readiness <b>probe</b>와 리소스 requests/limits로 운영형 배포를 구성한다.</span></li>
+          <li><span class="mk">4</span><span>구조화 로그·기본 모니터링으로 <b>관측성</b>을 확보하고, 스모크 테스트로 배포를 검증한다.</span></li>
+          <li><span class="mk">5</span><span><b>비용·성능·보안</b> 관점에서 배포를 점검한다.</span></li>
+          <li><span class="mk">6</span><span>4주 몰입형 프로젝트의 <b>팀 편성·주제 선정·기획 방향</b>을 잡는다.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 개요 / 이번 주 지도 -->
+  <section class="slide t-finale" aria-label="개념 개요">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 / 이번 주 지도 — 12주 피날레</div>
+        <h2 class="head">조각들을 <span class="accent">하나의 배포 단위로 묶는다</span></h2>
+        <div class="flow">
+          <span class="st fin">블록1 로컬→K8s</span><span class="ar">→</span>
+          <span class="st fin">블록2 LLM·RAG</span><span class="ar">→</span>
+          <span class="st fin">블록3 Agent·Multi-Agent</span><span class="ar">→</span>
+          <span class="st now">week12 통합 배포<br/>+ 프로젝트 킥오프</span>
+        </div>
+        <div class="grid grid-4" style="max-width:min(97vw,1180px)">
+          <div class="card"><b style="color:var(--accent)">① 통합 배포</b><p class="lead" style="margin-top:0.25em">흩어진 조각 → 컨테이너 → K8s 한 단위로</p></div>
+          <div class="card"><b style="color:var(--accent)">② 관측성</b><p class="lead" style="margin-top:0.25em">배포는 시작 — JSON 로그 + <code class="inl">/metrics</code></p></div>
+          <div class="card"><b style="color:var(--accent)">③ 12요소·점검</b><p class="lead" style="margin-top:0.25em">설정 외부화 · 비용/성능/보안 재점검</p></div>
+          <div class="card"><b style="color:var(--accent)">④ 킥오프</b><p class="lead" style="margin-top:0.25em">docpilot을 발판 삼은 4주 몰입 프로젝트</p></div>
+        </div>
+        <p class="note">3부 구성: <b>1부 전체 스택 컨테이너화 → 2부 K8s 통합 배포(Secret·probe·HPA·Ingress) → 3부 관측성 + 스모크 테스트</b>. 그 뒤 몰입형 프로젝트를 킥오프한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ① 통합 배포 구성도 -->
+  <section class="slide t-finale" aria-label="통합 배포 구성도">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ① / 통합 배포란</div>
+        <h2 class="head">하나의 네임스페이스 안에 <span class="accent">docpilot 전체</span></h2>
+        <div class="split" style="align-items:center;gap:clamp(0.8rem,2vw,2rem)">
+          <div class="k8s" style="width:100%">
+            <div class="ext">외부 사용자 · OpenAI API (LLM 호출)</div>
+            <div class="k8s"><div class="row"><span class="ar">▼</span></div></div>
+            <div class="ns">
+              <div class="ns-lbl">Kubernetes · namespace: docpilot</div>
+              <div class="row"><span class="node">Ingress</span><span class="ar">→</span><span class="node">Service(web)</span></div>
+              <div class="row"><span class="ar">▼</span></div>
+              <div class="row"><span class="node web">Deployment(docpilot-web) · probe/resources</span><span class="node sec">HPA</span></div>
+              <div class="row"><span class="node sec">ConfigMap 설정</span><span class="node sec">Secret OPENAI_API_KEY</span></div>
+              <div class="row"><span class="ar">▼</span></div>
+              <div class="row"><span class="node">Service(postgres)</span><span class="ar">→</span><span class="node db">StatefulSet(PostgreSQL + pgvector)</span></div>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">지금까지 vs 이번 주</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">기능을 하나씩(로컬 → 컨테이너 → K8s → AI → Agent) 붙여 왔다. 이번 주는 이 조각들을 <b>하나의 배포 단위로 묶어</b> 클러스터 위에서 함께 돌게 만든다.</p>
+            </div>
+            <div class="note">web 파드는 <b>무상태</b>, 상태는 DB/벡터DB에. 벡터DB는 <b>pgvector</b>로 Postgres에 통합한다(Chroma 사이드카는 대안).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ② 관측성 + 12요소 재점검 -->
+  <section class="slide t-finale" aria-label="관측성과 12요소 재점검">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ② / 관측성 + 12요소(12-Factor) 재점검</div>
+        <h2 class="head">배포는 끝이 아니라 <span class="accent">시작이다</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <span class="pill">관측성(Observability)</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)"><b>로그·메트릭</b>이 없으면 장애를 못 본다. 이번 주는 (1) 앱이 <b>구조화(JSON) 로그</b>를 stdout에 찍고, (2) <code class="inl">kubectl logs</code>로 수집하며, (3) <code class="inl">/metrics</code>로 기본 지표를 노출하는 데까지 한다. 무거운 스택(Prometheus/Grafana)은 프로젝트의 선택 과제로.</p>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <table class="tbl">
+              <thead><tr><th>요소</th><th>docpilot에서</th></tr></thead>
+              <tbody>
+                <tr><td class="em">III. 설정</td><td>ConfigMap/Secret으로 주입</td></tr>
+                <tr><td class="em">IV. 백엔드 서비스</td><td>Postgres를 Service로 연결(URL만 교체)</td></tr>
+                <tr><td class="em">VI. 프로세스</td><td>web 파드 무상태, 상태는 DB/벡터DB</td></tr>
+                <tr><td class="em">IX. 폐기성</td><td>probe + <code>SIGTERM</code> 처리</td></tr>
+                <tr><td class="em">XI. 로그</td><td>stdout JSON → <code>kubectl logs</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="note">docpilot이 클라우드 네이티브 원칙(12-Factor)을 지키는지 표로 되짚는다. 설정·비밀은 코드가 아니라 <b>환경에서</b> 온다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ③ 비용·성능·보안 -->
+  <section class="slide t-finale" aria-label="비용 성능 보안">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ③ / 비용 · 성능 · 보안</div>
+        <h2 class="head">운영형 배포의 <span class="accent">세 가지 관점</span></h2>
+        <div class="grid grid-3" style="max-width:min(97vw,1200px)">
+          <div class="card">
+            <span class="pill" style="background:color-mix(in srgb,var(--ochre) 30%,var(--paper));color:var(--terracotta-deep);border-color:var(--terracotta-deep)">비용</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)"><b>LLM 토큰</b>이 가장 큰 변수. 모델을 <code class="inl">gpt-4o-mini</code>로 고정, 캐싱/상한(<code class="inl">MAX_TOOL_TURNS</code>)으로 제어. 무료 대안(HF Inference, 로컬 Ollama)도 존재.</p>
+          </div>
+          <div class="card">
+            <span class="pill" style="background:color-mix(in srgb,var(--sage) 34%,var(--paper));color:var(--sage-deep);border-color:var(--sage-deep)">성능</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">resources requests/limits로 <b>스케줄링 안정화</b>, <b>HPA</b>로 부하 대응. 파드가 죽어도 자동 복구되게.</p>
+          </div>
+          <div class="card">
+            <span class="pill" style="background:color-mix(in srgb,var(--coral) 30%,var(--paper));color:var(--coral-deep);border-color:var(--coral-deep)">보안</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)"><b>API 키는 절대 이미지·코드·git에 넣지 않는다.</b> K8s Secret으로만 주입. 이미지에는 비밀이 없어야 한다.</p>
+          </div>
+        </div>
+        <div class="warn" style="max-width:min(97vw,1200px);align-self:center;width:100%">
+          <p class="lead" style="color:var(--ink);font-weight:600">핵심: 키는 없으면 <b style="color:var(--accent)">기동 시점에 즉시 실패(fail-fast)</b>해야 한다. 비밀을 코드에 하드코딩하지 않고 <b style="color:var(--accent)">K8s Secret/환경변수</b>로 주입한다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 사전 준비 -->
+  <section class="slide t-finale" aria-label="사전 준비">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">사전 준비 / 도구 + 클러스터 확인</div>
+        <h2 class="head">week01~11 산출물 + <span class="accent">kind 클러스터</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="card">
+              <span class="pill">지난주까지의 산출물</span>
+              <p class="lead" style="margin-top:0.4em;font-size:var(--small-size)">week01~11의 docpilot 전체. 특히 <b>week03</b>(web+PostgreSQL), <b>week04~05</b>(K8s Deployment/Service/ConfigMap/Secret/probe/HPA/Ingress), <b>week08</b>(벡터DB), <b>week11</b>(<code class="inl">/report</code> Multi-Agent).</p>
+            </div>
+            <div class="card" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">필요 도구</b>
+              <div class="reqstrip" style="margin-top:0.5em">
+                <span>Docker</span><span>kind</span><span>kubectl</span><span>OpenAI API Key</span><span>Python 3.12</span>
+              </div>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 도구 버전 + 클러스터 준비</span></div>
+<pre class="dense"><span class="tok-cm"># 도구 버전 확인</span>
+<span class="tok-cmd">docker</span> --version
+<span class="tok-cmd">kubectl</span> version --client
+<span class="tok-cmd">kind</span> --version
+
+<span class="tok-cm"># week04 kind 클러스터 재사용, 없으면 생성</span>
+<span class="tok-cmd">kind</span> get clusters | grep -q docpilot \
+  || <span class="tok-cmd">kind</span> create cluster --name docpilot
+<span class="tok-cmd">kubectl</span> cluster-info --context kind-docpilot</pre>
+            </div>
+            <div class="note">확인: 세 명령이 버전 문자열을 출력하고, <code class="inl">Kubernetes control plane is running at https://...</code> 가 보이면 준비 완료.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 실습 로드맵 -->
+  <section class="slide t-finale" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기 — 3부 구성</div>
+        <h2 class="head">컨테이너화 → <span class="accent">K8s 통합 배포 → 관측성</span></h2>
+        <div class="grid grid-3" style="max-width:min(97vw,1180px)">
+          <div class="card">
+            <span class="step-badge"><span class="num">1</span>전체 스택 컨테이너화</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)"><b>1</b> 의존성·설정 정리(config 재사용)<br/><b>2</b> requirements 고정 · <b>3</b> 프로덕션 Dockerfile</p>
+          </div>
+          <div class="card">
+            <span class="step-badge"><span class="num">2</span>K8s 통합 배포</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)"><b>4</b> Namespace/ConfigMap · <b>5</b> Secret<br/><b>6</b> Postgres · <b>7</b> web · <b>8</b> HPA/Ingress</p>
+          </div>
+          <div class="card">
+            <span class="step-badge"><span class="num">3</span>관측성 + 스모크</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)"><b>9</b> 구조화 로그 + <code class="inl">/metrics</code><br/><b>10</b> 스모크 테스트 · <b>11</b> 배포 점검</p>
+          </div>
+        </div>
+        <p class="note">모든 매니페스트는 <code class="inl">k8s/</code> 디렉터리에 모은다. 실습이 끝나면 <b>몰입형 4주 프로젝트</b>를 킥오프한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 1부 1단계 의존성·설정 정리 -->
+  <section class="slide t-finale" aria-label="1부 설정 정리 config 재사용">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 1단계 · 의존성·설정 정리 (12요소 III)</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">app/config.py</code> — <span class="accent">새로 만들지 말고 재사용</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="warn">
+              <b style="color:var(--accent);font-size:var(--small-size)">⚠️ 여기서 <code class="inl">app/config.py</code>를 새로 만들지 말 것</b>
+              <p class="lead" style="margin-top:0.3em;font-size:var(--small-size)">평범한 <code class="inl">os.environ</code> 버전으로 덮어쓰면 <b>week06~08에서 쌓은 필드가 전부 사라져</b> <code class="inl">app.llm</code>·<code class="inl">app.rag</code> 등의 import가 붕괴한다. 설정 모듈은 이미 <b>week06</b>에서 <code class="inl">pydantic-settings</code> 기반 <code class="inl">Settings</code> + <code class="inl">get_settings()</code>로 만들었다. <b>기존 파일을 재사용</b>하고 두 가지만 점검한다.</p>
+            </div>
+            <ul class="checklist" style="gap:clamp(0.3rem,0.9vh,0.7rem)">
+              <li><span class="mk">1</span><span><code class="inl">openai_api_key</code>가 <b>필수</b>(기본값 없음)로 선언되어, 키가 없으면 기동 시점에 즉시 실패(fail-fast)하는가.</span></li>
+              <li><span class="mk">2</span><span><code class="inl">database_url</code> 기본값이 컨테이너 네트워크 기준(<code class="inl">...@postgres:5432/...</code>)인가. 아니면 매니페스트에서 <code class="inl">DATABASE_URL</code>을 주입.</span></li>
+            </ul>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 설정 로딩 확인</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> -c <span class="tok-st">"from app.config import get_settings; \
+get_settings(); print('config OK')"</span></pre>
+            </div>
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">(필수 키가 있으면) <code class="inl">config OK</code> 가 출력된다. 키가 없으면 즉시 실패해야 정상 — 이 fail-fast가 곧 보안 규칙(비밀은 환경에서만)이다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 1부 2단계 requirements 고정 -->
+  <section class="slide t-finale" aria-label="1부 requirements 고정">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 2단계 · requirements 고정 (누적 의존성)</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">requirements.txt</code> — <span class="accent">11주 의존성을 모두</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">requirements.txt — week01~11 누적</span></div>
+<pre class="xdense"><span class="tok-cm"># --- 코어 (week01~06) ---</span>
+fastapi
+uvicorn[standard]
+python-multipart
+openai
+google-genai          <span class="tok-cm"># week06 Gemini 옵션</span>
+pydantic-settings     <span class="tok-cm"># week06 config.py</span>
+python-dotenv         <span class="tok-cm"># .env 로딩</span>
+
+<span class="tok-cm"># --- 데이터/RAG (week03·08) ---</span>
+psycopg[binary]
+pgvector
+chromadb              <span class="tok-cm"># 벡터 저장소(택1)</span>
+pypdf                 <span class="tok-cm"># 문서 파싱</span>
+
+<span class="tok-cm"># --- 에이전트 (week09~11) ---</span>
+langgraph
+langchain-openai
+mcp                   <span class="tok-cm"># week10 MCP</span>
+tenacity              <span class="tok-cm"># 재시도 백오프</span>
+
+<span class="tok-cm"># --- 멀티모달 (week07): 로컬 경로만 ---</span>
+huggingface_hub       <span class="tok-cm"># 매니지드 경로</span>
+pillow                <span class="tok-cm"># 이미지 처리</span>
+<span class="tok-cm"># transformers        # 로컬 캡션/ASR (torch 동반)</span>
+<span class="tok-cm"># torch               # 로컬 추론 (CPU 휠도 큼)</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 설치·임포트 검증</span></div>
+<pre class="dense"><span class="tok-cmd">pip</span> install -r requirements.txt
+<span class="tok-cmd">python</span> -c <span class="tok-st">"import fastapi, openai, langgraph, \
+psycopg, chromadb, mcp; print('deps OK')"</span></pre>
+            </div>
+            <div class="warn" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <p class="lead" style="color:var(--ink);font-weight:600;font-size:var(--small-size)">하나라도 빠지면 컨테이너가 <code class="inl">ModuleNotFoundError</code>로 죽고, 스모크 테스트의 <code class="inl">/ask</code>(RAG)·<code class="inl">/agent</code>가 실패한다. 최종적으로 <code class="inl">pip freeze &gt; requirements.txt</code>로 버전 고정 권장.</p>
+            </div>
+            <div class="note">확인: <code class="inl">deps OK</code> 가 출력된다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 1부 3단계 프로덕션 Dockerfile -->
+  <section class="slide t-finale" aria-label="1부 프로덕션 Dockerfile">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 3단계 · 프로덕션용 Dockerfile</div>
+        <h2 class="head">비루트 실행 + <span class="accent">graceful shutdown + <code class="inl" style="font-size:0.85em">COPY app ./app</code></span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">Dockerfile</span></div>
+<pre class="xdense"><span class="tok-kw">FROM</span> python:3.12-slim
+
+<span class="tok-cm"># 버퍼링 끄기 → 로그 즉시 stdout(12-Factor XI)</span>
+<span class="tok-kw">ENV</span> PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+<span class="tok-kw">WORKDIR</span> /app
+
+<span class="tok-cm"># 의존성 레이어 캐시: requirements 먼저</span>
+<span class="tok-kw">COPY</span> requirements.txt .
+<span class="tok-kw">RUN</span> pip install --no-cache-dir -r requirements.txt
+
+<span class="tok-cm"># 앱 소스 복사</span>
+<span class="tok-kw">COPY</span> app ./app
+
+<span class="tok-cm"># 비루트 유저로 실행(보안)</span>
+<span class="tok-kw">RUN</span> useradd -m appuser
+<span class="tok-kw">USER</span> appuser
+
+<span class="tok-kw">EXPOSE</span> 8000
+
+<span class="tok-cm"># SIGTERM에 정상 종료(12-Factor IX)</span>
+<span class="tok-kw">CMD</span> [<span class="tok-st">"uvicorn"</span>, <span class="tok-st">"app.main:app"</span>, \
+     <span class="tok-st">"--host"</span>, <span class="tok-st">"0.0.0.0"</span>, <span class="tok-st">"--port"</span>, <span class="tok-st">"8000"</span>]</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 빌드 + kind 로드</span></div>
+<pre class="dense"><span class="tok-cm"># 통합 이미지 빌드</span>
+<span class="tok-cmd">docker</span> build -t docpilot:1.0 .
+
+<span class="tok-cm"># 로컬 이미지를 kind 노드로 로드</span>
+<span class="tok-cm"># (레지스트리 없이 배포 가능)</span>
+<span class="tok-cmd">kind</span> load docker-image docpilot:1.0 \
+  --name docpilot</pre>
+            </div>
+            <div class="note"><code class="inl">app/</code> 밖 최상위 패키지(agent/·mcp_server/)를 뒀다면 그 디렉터리도 <code class="inl">COPY</code>해야 한다. <b>권장: 모든 소스를 <code class="inl">app/</code> 하위로 모으면</b> <code class="inl">COPY app ./app</code> 한 줄로 끝난다.</div>
+            <div class="note">확인: <code class="inl">docker images | grep docpilot</code> 에 <code class="inl">docpilot 1.0</code> 이 보이고, <code class="inl">kind load</code> 가 에러 없이 끝난다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 2부 4단계 Namespace + ConfigMap -->
+  <section class="slide t-finale" aria-label="2부 Namespace ConfigMap">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 4단계 · Namespace + ConfigMap</div>
+        <h2 class="head">비밀이 아닌 설정은 <span class="accent">ConfigMap으로 외부화</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/00-namespace.yaml</span></div>
+<pre class="dense"><span class="tok-yk">apiVersion</span>: v1
+<span class="tok-yk">kind</span>: Namespace
+<span class="tok-yk">metadata</span>:
+  <span class="tok-yk">name</span>: docpilot</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/01-config.yaml (비밀 아닌 설정만)</span></div>
+<pre class="dense"><span class="tok-yk">apiVersion</span>: v1
+<span class="tok-yk">kind</span>: ConfigMap
+<span class="tok-yk">metadata</span>:
+  <span class="tok-yk">name</span>: docpilot-config
+  <span class="tok-yk">namespace</span>: docpilot
+<span class="tok-yk">data</span>:
+  <span class="tok-yk">DOCPILOT_MODEL</span>: <span class="tok-st">"gpt-4o-mini"</span>
+  <span class="tok-yk">LOG_LEVEL</span>: <span class="tok-st">"INFO"</span>
+  <span class="tok-yk">DATABASE_URL</span>: <span class="tok-st">"postgresql://docpilot:docpilot@postgres:5432/docpilot"</span></pre>
+          </div>
+        </div>
+        <div class="code">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 적용</span></div>
+<pre class="dense"><span class="tok-cmd">kubectl</span> apply -f k8s/00-namespace.yaml
+<span class="tok-cmd">kubectl</span> apply -f k8s/01-config.yaml</pre>
+        </div>
+        <div class="note">확인: <code class="inl">kubectl get configmap -n docpilot</code> 에 <code class="inl">docpilot-config</code> 가 보인다. <code class="inl">DATABASE_URL</code>의 호스트명(<code class="inl">postgres</code>)이 6단계 Service 이름과 일치해야 한다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. 2부 5단계 Secret -->
+  <section class="slide t-finale" aria-label="2부 Secret API 키">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 5단계 · Secret으로 API 키 주입 (보안 핵심)</div>
+        <h2 class="head">키를 YAML·git에 적지 말고 <span class="accent">명령으로 생성</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — Secret 생성 (파일·git에 남기지 않음)</span></div>
+<pre class="dense"><span class="tok-cmd">kubectl</span> create secret generic docpilot-secrets \
+  --namespace docpilot \
+  --from-literal=OPENAI_API_KEY=<span class="tok-st">"${OPENAI_API_KEY}"</span></pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 확인 (앞 7자만 복원)</span></div>
+<pre class="dense"><span class="tok-cmd">kubectl</span> get secret docpilot-secrets -n docpilot \
+  -o jsonpath=<span class="tok-st">'{.data.OPENAI_API_KEY}'</span> \
+  | base64 -d | head -c 7; <span class="tok-cmd">echo</span> <span class="tok-st">"..."</span></pre>
+          </div>
+        </div>
+        <div class="warn" style="max-width:min(97vw,1180px);align-self:center;width:100%">
+          <p class="lead" style="color:var(--ink);font-weight:600;font-size:var(--small-size)"><code class="inl">sk-...</code> 처럼 키 앞부분이 복원되면 정상. <b style="color:var(--accent)">Secret은 base64 인코딩일 뿐 암호화가 아니다</b> — 운영에선 Sealed Secrets/외부 KMS를 쓴다. <code class="inl">--from-literal</code>은 키를 파일로 남기지 않아 git 유출을 막는다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 2부 6단계 PostgreSQL (pgvector) -->
+  <section class="slide t-finale" aria-label="2부 PostgreSQL pgvector">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 6단계 · PostgreSQL (pgvector 포함)</div>
+        <h2 class="head"><span class="accent">StatefulSet</span> + <code class="inl" style="font-size:0.82em">pgvector/pgvector:pg16</code></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/02-postgres.yaml — Service + StatefulSet</span></div>
+<pre class="xdense"><span class="tok-yk">apiVersion</span>: v1
+<span class="tok-yk">kind</span>: Service
+<span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: postgres, <span class="tok-yk">namespace</span>: docpilot}
+<span class="tok-yk">spec</span>:
+  <span class="tok-yk">selector</span>: {<span class="tok-yk">app</span>: postgres}
+  <span class="tok-yk">ports</span>: [{<span class="tok-yk">port</span>: 5432, <span class="tok-yk">targetPort</span>: 5432}]
+<span class="tok-op">---</span>
+<span class="tok-yk">apiVersion</span>: apps/v1
+<span class="tok-yk">kind</span>: StatefulSet
+<span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: postgres, <span class="tok-yk">namespace</span>: docpilot}
+<span class="tok-yk">spec</span>:
+  <span class="tok-yk">serviceName</span>: postgres
+  <span class="tok-yk">replicas</span>: 1
+  <span class="tok-yk">selector</span>: {<span class="tok-yk">matchLabels</span>: {<span class="tok-yk">app</span>: postgres}}
+  <span class="tok-yk">template</span>:
+    <span class="tok-yk">metadata</span>: {<span class="tok-yk">labels</span>: {<span class="tok-yk">app</span>: postgres}}
+    <span class="tok-yk">spec</span>:
+      <span class="tok-yk">containers</span>:
+        - <span class="tok-yk">name</span>: postgres
+          <span class="tok-yk">image</span>: pgvector/pgvector:pg16
+          <span class="tok-yk">env</span>:
+            - {<span class="tok-yk">name</span>: POSTGRES_USER, <span class="tok-yk">value</span>: docpilot}
+            - {<span class="tok-yk">name</span>: POSTGRES_PASSWORD, <span class="tok-yk">value</span>: docpilot}
+            - {<span class="tok-yk">name</span>: POSTGRES_DB, <span class="tok-yk">value</span>: docpilot}
+          <span class="tok-yk">readinessProbe</span>:
+            <span class="tok-yk">exec</span>: {<span class="tok-yk">command</span>: [<span class="tok-st">"pg_isready"</span>,<span class="tok-st">"-U"</span>,<span class="tok-st">"docpilot"</span>]}
+            <span class="tok-yk">initialDelaySeconds</span>: 5
+          <span class="tok-yk">volumeMounts</span>:
+            - {<span class="tok-yk">name</span>: pgdata, <span class="tok-yk">mountPath</span>: /var/lib/postgresql/data}
+  <span class="tok-yk">volumeClaimTemplates</span>:
+    - <span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: pgdata}
+      <span class="tok-yk">spec</span>:
+        <span class="tok-yk">accessModes</span>: [<span class="tok-st">"ReadWriteOnce"</span>]
+        <span class="tok-yk">resources</span>: {<span class="tok-yk">requests</span>: {<span class="tok-yk">storage</span>: 1Gi}}</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 적용 + 롤아웃 대기</span></div>
+<pre class="dense"><span class="tok-cmd">kubectl</span> apply -f k8s/02-postgres.yaml
+<span class="tok-cmd">kubectl</span> rollout status \
+  statefulset/postgres -n docpilot \
+  --timeout=120s</pre>
+            </div>
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">kubectl get pods -n docpilot</code> 에서 <code class="inl">postgres-0</code> 이 <code class="inl">Running</code> + <code class="inl">READY 1/1</code> 이 된다. pgvector 확장이 포함된 공식 이미지라 별도 벡터DB가 필요 없다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 2부 7단계 web Deployment -->
+  <section class="slide t-finale" aria-label="2부 web Deployment probe resources env">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 7단계 · web Deployment (probe + resources + env)</div>
+        <h2 class="head"><span class="accent">ConfigMap→설정, Secret→키</span>를 env로 주입</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/03-web.yaml — Deployment</span></div>
+<pre class="xdense"><span class="tok-yk">apiVersion</span>: apps/v1
+<span class="tok-yk">kind</span>: Deployment
+<span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: docpilot-web, <span class="tok-yk">namespace</span>: docpilot}
+<span class="tok-yk">spec</span>:
+  <span class="tok-yk">replicas</span>: 2
+  <span class="tok-yk">selector</span>: {<span class="tok-yk">matchLabels</span>: {<span class="tok-yk">app</span>: docpilot-web}}
+  <span class="tok-yk">template</span>:
+    <span class="tok-yk">metadata</span>: {<span class="tok-yk">labels</span>: {<span class="tok-yk">app</span>: docpilot-web}}
+    <span class="tok-yk">spec</span>:
+      <span class="tok-yk">containers</span>:
+        - <span class="tok-yk">name</span>: web
+          <span class="tok-yk">image</span>: docpilot:1.0
+          <span class="tok-yk">imagePullPolicy</span>: IfNotPresent   <span class="tok-cm"># 로컬 이미지</span>
+          <span class="tok-yk">ports</span>: [{<span class="tok-yk">containerPort</span>: 8000}]
+          <span class="tok-yk">envFrom</span>:
+            - <span class="tok-yk">configMapRef</span>: {<span class="tok-yk">name</span>: docpilot-config}
+          <span class="tok-yk">env</span>:
+            - <span class="tok-yk">name</span>: OPENAI_API_KEY          <span class="tok-cm"># 비밀만</span>
+              <span class="tok-yk">valueFrom</span>:
+                <span class="tok-yk">secretKeyRef</span>:
+                  <span class="tok-yk">name</span>: docpilot-secrets
+                  <span class="tok-yk">key</span>: OPENAI_API_KEY
+          <span class="tok-yk">resources</span>:
+            <span class="tok-yk">requests</span>: {<span class="tok-yk">cpu</span>: <span class="tok-st">"100m"</span>, <span class="tok-yk">memory</span>: <span class="tok-st">"256Mi"</span>}
+            <span class="tok-yk">limits</span>: {<span class="tok-yk">cpu</span>: <span class="tok-st">"500m"</span>, <span class="tok-yk">memory</span>: <span class="tok-st">"512Mi"</span>}
+          <span class="tok-yk">readinessProbe</span>:
+            <span class="tok-yk">httpGet</span>: {<span class="tok-yk">path</span>: /health, <span class="tok-yk">port</span>: 8000}
+            <span class="tok-yk">initialDelaySeconds</span>: 5
+          <span class="tok-yk">livenessProbe</span>:
+            <span class="tok-yk">httpGet</span>: {<span class="tok-yk">path</span>: /health, <span class="tok-yk">port</span>: 8000}
+            <span class="tok-yk">initialDelaySeconds</span>: 15</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/03-web.yaml — Service</span></div>
+<pre class="xdense"><span class="tok-op">---</span>
+<span class="tok-yk">apiVersion</span>: v1
+<span class="tok-yk">kind</span>: Service
+<span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: docpilot-web, <span class="tok-yk">namespace</span>: docpilot}
+<span class="tok-yk">spec</span>:
+  <span class="tok-yk">selector</span>: {<span class="tok-yk">app</span>: docpilot-web}
+  <span class="tok-yk">ports</span>: [{<span class="tok-yk">port</span>: 80, <span class="tok-yk">targetPort</span>: 8000}]</pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 적용 + 롤아웃</span></div>
+<pre class="xdense"><span class="tok-cmd">kubectl</span> apply -f k8s/03-web.yaml
+<span class="tok-cmd">kubectl</span> rollout status \
+  deployment/docpilot-web -n docpilot \
+  --timeout=120s</pre>
+            </div>
+            <div class="note">확인: 파드 2개가 <code class="inl">Running</code> + <code class="inl">READY 1/1</code>. readiness가 <code class="inl">/health</code>를 통과 못 하면 <code class="inl">READY 0/1</code>에 머무니 9단계 로그로 원인을 본다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. 2부 8단계 HPA + Ingress -->
+  <section class="slide t-finale" aria-label="2부 HPA Ingress">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 8단계 · HPA + Ingress (운영형)</div>
+        <h2 class="head">부하 기반 <span class="accent">오토스케일 + 외부 노출</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/04-hpa.yaml</span></div>
+<pre class="xdense"><span class="tok-yk">apiVersion</span>: autoscaling/v2
+<span class="tok-yk">kind</span>: HorizontalPodAutoscaler
+<span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: docpilot-web, <span class="tok-yk">namespace</span>: docpilot}
+<span class="tok-yk">spec</span>:
+  <span class="tok-yk">scaleTargetRef</span>:
+    <span class="tok-yk">apiVersion</span>: apps/v1
+    <span class="tok-yk">kind</span>: Deployment
+    <span class="tok-yk">name</span>: docpilot-web
+  <span class="tok-yk">minReplicas</span>: 2
+  <span class="tok-yk">maxReplicas</span>: 6
+  <span class="tok-yk">metrics</span>:
+    - <span class="tok-yk">type</span>: Resource
+      <span class="tok-yk">resource</span>:
+        <span class="tok-yk">name</span>: cpu
+        <span class="tok-yk">target</span>:
+          <span class="tok-yk">type</span>: Utilization
+          <span class="tok-yk">averageUtilization</span>: 70</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">k8s/05-ingress.yaml</span></div>
+<pre class="xdense"><span class="tok-yk">apiVersion</span>: networking.k8s.io/v1
+<span class="tok-yk">kind</span>: Ingress
+<span class="tok-yk">metadata</span>: {<span class="tok-yk">name</span>: docpilot, <span class="tok-yk">namespace</span>: docpilot}
+<span class="tok-yk">spec</span>:
+  <span class="tok-yk">rules</span>:
+    - <span class="tok-yk">host</span>: docpilot.local
+      <span class="tok-yk">http</span>:
+        <span class="tok-yk">paths</span>:
+          - <span class="tok-yk">path</span>: /
+            <span class="tok-yk">pathType</span>: Prefix
+            <span class="tok-yk">backend</span>:
+              <span class="tok-yk">service</span>:
+                <span class="tok-yk">name</span>: docpilot-web
+                <span class="tok-yk">port</span>: {<span class="tok-yk">number</span>: 80}</pre>
+          </div>
+        </div>
+        <div class="code">
+          <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 적용</span></div>
+<pre class="dense"><span class="tok-cmd">kubectl</span> apply -f k8s/04-hpa.yaml
+<span class="tok-cm"># Ingress는 컨트롤러가 있을 때만 동작(없으면 10단계 port-forward)</span>
+<span class="tok-cmd">kubectl</span> apply -f k8s/05-ingress.yaml</pre>
+        </div>
+        <div class="note">확인: <code class="inl">kubectl get hpa -n docpilot</code> 에 <code class="inl">docpilot-web</code> 이 보인다. <code class="inl">TARGETS</code>가 <code class="inl">&lt;unknown&gt;</code>이면 metrics-server 미설치(트러블슈팅 참고).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 3부 9단계 구조화 로그 + /metrics -->
+  <section class="slide t-finale" aria-label="3부 구조화 로그 metrics 관측성">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 9단계 · 구조화 로그 + <code class="inl">/metrics</code> (관측성)</div>
+        <h2 class="head">요청을 <span class="accent">JSON 한 줄</span>로, 지표를 <span class="accent"><code class="inl" style="font-size:0.85em">/metrics</code></span>로</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py 에 추가 — 로그 미들웨어</span></div>
+<pre class="xdense"><span class="tok-kw">import</span> json, logging, sys, time
+<span class="tok-kw">from</span> fastapi <span class="tok-kw">import</span> Request
+<span class="tok-kw">from</span> fastapi.responses <span class="tok-kw">import</span> PlainTextResponse
+
+logging.basicConfig(stream=sys.stdout, level=<span class="tok-st">"INFO"</span>,
+                    format=<span class="tok-st">"%(message)s"</span>)
+logger = logging.getLogger(<span class="tok-st">"docpilot"</span>)
+_metrics = {<span class="tok-st">"requests_total"</span>: <span class="tok-nm">0</span>, <span class="tok-st">"errors_total"</span>: <span class="tok-nm">0</span>}
+
+
+<span class="tok-kw">@app.middleware</span>(<span class="tok-st">"http"</span>)
+<span class="tok-kw">async def</span> <span class="tok-fn">access_log</span>(request: Request, call_next):
+    <span class="tok-st">"""요청을 JSON 한 줄 로그로 남기고 카운터 증가."""</span>
+    start = time.time()
+    _metrics[<span class="tok-st">"requests_total"</span>] += <span class="tok-nm">1</span>
+    <span class="tok-kw">try</span>:
+        response = <span class="tok-kw">await</span> call_next(request)
+    <span class="tok-kw">except</span> <span class="tok-fn">Exception</span>:
+        _metrics[<span class="tok-st">"errors_total"</span>] += <span class="tok-nm">1</span>
+        <span class="tok-kw">raise</span>
+    dur_ms = <span class="tok-fn">round</span>((time.time() - start) * <span class="tok-nm">1000</span>, <span class="tok-nm">1</span>)
+    logger.info(json.dumps({
+        <span class="tok-st">"path"</span>: request.url.path,
+        <span class="tok-st">"method"</span>: request.method,
+        <span class="tok-st">"status"</span>: response.status_code,
+        <span class="tok-st">"duration_ms"</span>: dur_ms}))
+    <span class="tok-kw">return</span> response</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — /metrics</span></div>
+<pre class="xdense"><span class="tok-kw">@app.get</span>(<span class="tok-st">"/metrics"</span>, response_class=PlainTextResponse)
+<span class="tok-kw">def</span> <span class="tok-fn">metrics</span>() -&gt; <span class="tok-fl">str</span>:
+    <span class="tok-st">"""Prometheus 텍스트 포맷 기본 지표."""</span>
+    <span class="tok-kw">return</span> (
+        <span class="tok-st">f"docpilot_requests_total {_metrics['requests_total']}\n"</span>
+        <span class="tok-st">f"docpilot_errors_total {_metrics['errors_total']}\n"</span>)</pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 재빌드 → 로드 → 무중단 롤아웃</span></div>
+<pre class="xdense"><span class="tok-cmd">docker</span> build -t docpilot:1.1 .
+<span class="tok-cmd">kind</span> load docker-image docpilot:1.1 --name docpilot
+<span class="tok-cmd">kubectl</span> set image deployment/docpilot-web \
+  web=docpilot:1.1 -n docpilot
+<span class="tok-cmd">kubectl</span> rollout status \
+  deployment/docpilot-web -n docpilot --timeout=120s</pre>
+            </div>
+            <div class="note">확인: <code class="inl">successfully rolled out</code>. 실패하면 <code class="inl">kubectl rollout undo</code> 로 1.0으로 롤백(복습).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 3부 10단계 스모크 테스트 -->
+  <section class="slide t-finale" aria-label="3부 스모크 테스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 10단계 · 최종 스모크 테스트</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">port-forward</code> → <span class="accent">헬스 → RAG → Multi-Agent</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">smoke.sh — 레포에 저장해 반복 사용</span></div>
+<pre class="xdense"><span class="tok-cm">#!/usr/bin/env bash</span>
+<span class="tok-kw">set</span> -euo pipefail
+BASE=<span class="tok-st">"http://localhost:8080"</span>
+
+<span class="tok-cmd">echo</span> <span class="tok-st">"[1/4] /health"</span>
+<span class="tok-cmd">curl</span> -fs <span class="tok-st">"$BASE/health"</span> &amp;&amp; <span class="tok-cmd">echo</span>
+
+<span class="tok-cmd">echo</span> <span class="tok-st">"[2/4] /metrics"</span>
+<span class="tok-cmd">curl</span> -fs <span class="tok-st">"$BASE/metrics"</span> &amp;&amp; <span class="tok-cmd">echo</span>
+
+<span class="tok-cmd">echo</span> <span class="tok-st">"[3/4] /ask (week08 RAG)"</span>
+<span class="tok-cmd">curl</span> -fs -X POST <span class="tok-st">"$BASE/ask"</span> \
+  -H <span class="tok-st">"Content-Type: application/json"</span> \
+  -d <span class="tok-st">'{"question": "docpilot이 무엇인가?"}'</span> \
+  | python -m json.tool
+
+<span class="tok-cmd">echo</span> <span class="tok-st">"[4/4] /report (week11 Multi-Agent)"</span>
+<span class="tok-cmd">curl</span> -fs -X POST <span class="tok-st">"$BASE/report"</span> \
+  -H <span class="tok-st">"Content-Type: application/json"</span> \
+  -d <span class="tok-st">'{"topic": "docpilot의 전체 아키텍처 요약"}'</span> \
+  | python -m json.tool
+
+<span class="tok-cmd">echo</span> <span class="tok-st">"SMOKE TEST PASSED"</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 포워딩 + 실행 + 로그 관찰</span></div>
+<pre class="xdense"><span class="tok-cmd">kubectl</span> port-forward -n docpilot \
+  service/docpilot-web 8080:80 &amp;
+<span class="tok-cmd">sleep</span> 3
+
+<span class="tok-cmd">chmod</span> +x smoke.sh
+./smoke.sh
+
+<span class="tok-cm"># JSON 로그가 수집됐는지</span>
+<span class="tok-cmd">kubectl</span> logs -n docpilot \
+  -l app=docpilot-web --tail=20</pre>
+            </div>
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">4단계 모두 200, 마지막에 <code class="inl">SMOKE TEST PASSED</code>. <code class="inl">/report</code> 응답의 <code class="inl">log</code>에 week11 협업 로그가 포함되고, <code class="inl">{"path":"/report","status":200,...}</code> 형태 JSON 로그가 보인다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 3부 11단계 배포 점검 -->
+  <section class="slide t-finale" aria-label="3부 배포 점검 비용 성능 보안">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 11단계 · 배포 점검 (비용·성능·보안 셀프 체크)</div>
+        <h2 class="head">배포가 <span class="accent">운영 원칙을 지키는가</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 상태 한 번에 점검</span></div>
+<pre class="dense"><span class="tok-cm"># 리소스·파드·오토스케일 상태</span>
+<span class="tok-cmd">kubectl</span> get all -n docpilot
+
+<span class="tok-cm"># CPU/메모리 실사용 (metrics-server 필요)</span>
+<span class="tok-cmd">kubectl</span> top pods -n docpilot</pre>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%;background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">셀프 체크</b>
+            <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.28rem,0.85vh,0.6rem)">
+              <li><span class="mk">보</span><span><b>보안</b>: 이미지·git에 키 없음(<code class="inl">grep -r "sk-" app/ || echo clean</code>). 키는 Secret에만.</span></li>
+              <li><span class="mk">성</span><span><b>성능</b>: 모든 컨테이너에 resources requests/limits.</span></li>
+              <li><span class="mk">비</span><span><b>비용</b>: 모델 <code class="inl">gpt-4o-mini</code> 고정, tool 루프 상한 유지.</span></li>
+              <li><span class="mk">폐</span><span><b>폐기성</b>: 파드를 지워도 자동 복구되고 서비스가 안 끊긴다.</span></li>
+            </ul>
+          </div>
+        </div>
+        <div class="note">확인: web 파드 2개 + postgres 1개가 Running. 정리(선택): <code class="inl">kill %1</code>로 port-forward 종료, <code class="inl">kind delete cluster --name docpilot</code>로 완전 삭제.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 몰입형 프로젝트 킥오프 -->
+  <section class="slide t-finale" aria-label="몰입형 프로젝트 킥오프 팀 편성 주제">
+    <svg class="motif motif--branch float-motif" style="--mo:0.3" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M30 30C60 60 60 100 40 140C70 120 110 120 150 150C120 110 120 70 150 40C110 60 70 60 30 30Z"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">몰입형 프로젝트 킥오프 (4주) / 팀 · 주제 · 발전 경로</div>
+        <h2 class="head">docpilot을 <span class="accent">발판(seed) 삼아 확장</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="card">
+              <span class="pill">팀 편성 (권장 3~4명)</span>
+              <p class="lead" style="margin-top:0.4em;font-size:var(--small-size)">역할을 미리 나눈다: <b>백엔드/배포</b>(K8s·CI), <b>AI/Agent</b>(LLM·RAG·Multi-Agent), <b>프론트/문서·발표</b>. week11 Multi-Agent처럼 <b>사람도 역할 분담이 협업의 핵심</b>.</p>
+            </div>
+            <div class="card">
+              <span class="pill">주제 예시</span>
+              <p class="lead" style="margin-top:0.4em;font-size:var(--small-size)">문서 QA Agent(<code class="inl">/ask</code> 확장) · 멀티 에이전트 리서치 어시스턴트(<code class="inl">/report</code> 확장) · 코드/데이터 분석 Agent · 멀티모달 상담 봇(week07 재사용).</p>
+            </div>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <b style="color:var(--accent);font-size:var(--small-size)">docpilot → 프로젝트 발전 경로</b>
+            <table class="tbl" style="margin-top:0.4em">
+              <thead><tr><th>지금 있는 것</th><th>발전 방향</th></tr></thead>
+              <tbody>
+                <tr><td class="em"><code>/ask</code> RAG (w08)</td><td>도메인 문서 교체, 하이브리드 검색·재랭킹</td></tr>
+                <tr><td class="em"><code>/agent</code> 도구·MCP (w09-10)</td><td>실제 업무 도구(캘린더/이슈/파일) 연동</td></tr>
+                <tr><td class="em"><code>/report</code> Multi-Agent (w11)</td><td>reviewer/planner 확장, HITL 승인</td></tr>
+                <tr><td class="em">K8s 통합 배포 (w12)</td><td>클라우드(EKS/GKE)·CI/CD·관측성 강화</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="note"><b>필수 요소</b>: AI API 연계 1개 이상 · Agent 요소(도구 연동 또는 Multi-Agent) 1개 이상 · 컨테이너화 + K8s(또는 클라우드) 배포 · README + 데모.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 기획 발표 + 4주 일정 -->
+  <section class="slide t-finale" aria-label="기획 발표와 4주 일정">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">킥오프 / 기획 발표 안내 + 4주 일정</div>
+        <h2 class="head">팀별 <span class="accent">5분 기획 발표</span>를 준비한다</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <b style="color:var(--accent)">발표에 담을 것</b>
+            <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.3rem,0.9vh,0.7rem)">
+              <li><span class="mk">1</span><span>문제 정의 &amp; 타깃 사용자</span></li>
+              <li><span class="mk">2</span><span>핵심 기능(필수 요소 매핑 표)</span></li>
+              <li><span class="mk">3</span><span>아키텍처 스케치(어떤 AI/Agent + 어떻게 배포)</span></li>
+              <li><span class="mk">4</span><span>4주 일정 &amp; 역할 분담</span></li>
+            </ul>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <b style="color:var(--accent)">4주 일정 (권장)</b>
+            <table class="tbl" style="margin-top:0.4em">
+              <thead><tr><th style="width:20%">주</th><th>활동</th></tr></thead>
+              <tbody>
+                <tr><td class="em">1주차</td><td>기획 확정·아키텍처 설계·역할 분담 (오늘 킥오프 연계)</td></tr>
+                <tr><td class="em">2주차</td><td>핵심 기능 구현 (AI/Agent 파이프라인)</td></tr>
+                <tr><td class="em">3주차</td><td>통합·컨테이너화·클라우드 배포·테스트</td></tr>
+                <tr><td class="em">4주차</td><td>마감·발표 준비·최종 데모</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="note">상세 규정·루브릭은 <b>[평가와 몰입형 프로젝트]</b> 문서를 따른다. 팀 규모는 수강 인원에 맞춰 조정하되 권장 <b>3~4명</b>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. 트러블슈팅 -->
+  <section class="slide t-finale" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">막히면 <span class="accent">여기부터</span></h2>
+        <div class="card" style="max-width:min(97vw,1240px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:28%">증상</th><th style="width:30%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td class="em">web 파드 <code>CrashLoopBackOff</code></td><td><code>OPENAI_API_KEY</code> 미주입 → config 기동 실패</td><td><code>kubectl get secret</code> 확인 후 5단계 Secret 재생성</td></tr>
+              <tr><td class="em">파드 <code>READY 0/1</code> 지속</td><td>readiness <code>/health</code> 실패</td><td><code>kubectl logs</code>/<code>describe pod</code>로 원인, <code>/health</code> 라우트 확인</td></tr>
+              <tr><td class="em"><code>ImagePullBackOff</code></td><td>kind에 이미지 미로드 or 정책</td><td><code>kind load docker-image ...</code>, <code>imagePullPolicy: IfNotPresent</code></td></tr>
+              <tr><td class="em">DB 연결 실패</td><td>Postgres 미기동 or URL 불일치</td><td><code>postgres-0</code> Running 확인, ConfigMap URL과 Service명 일치</td></tr>
+              <tr><td class="em"><code>pgvector</code> 확장 없음</td><td>일반 postgres 이미지 사용</td><td>이미지를 <code>pgvector/pgvector:pg16</code>으로, <code>CREATE EXTENSION vector;</code></td></tr>
+              <tr><td class="em">HPA <code>TARGETS &lt;unknown&gt;</code></td><td>metrics-server 미설치</td><td>metrics-server 설치(kind는 <code>--kubelet-insecure-tls</code> 패치)</td></tr>
+              <tr><td class="em">Ingress 접속 불가</td><td>Ingress 컨트롤러 없음</td><td>학습용은 <code>kubectl port-forward</code>로 대체(10단계)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 23. 과제 + 체크리스트 -->
+  <section class="slide t-finale" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / 몰입형 프로젝트 기획서 (팀 단위)</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">기획서.md</code> 제출로 <span class="accent">4주 프로젝트 시작</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">기획서에 담을 것</b>
+            <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.24rem,0.8vh,0.5rem)">
+              <li><span class="mk">1</span><span>팀명·구성원·역할 분담</span></li>
+              <li><span class="mk">2</span><span>문제 정의 &amp; 타깃 사용자</span></li>
+              <li><span class="mk">3</span><span>핵심 기능 + <b>필수 요소 매핑 표</b>(AI API / Agent / 배포 / 문서·데모)</span></li>
+              <li><span class="mk">4</span><span>아키텍처 스케치(다이어그램 또는 텍스트)</span></li>
+              <li><span class="mk">5</span><span>4주 일정 &amp; 마일스톤</span></li>
+              <li><span class="mk">6</span><span>docpilot에서 재사용 vs 새로 만들 것</span></li>
+            </ul>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.5em;gap:clamp(0.2rem,0.7vh,0.44rem)">
+              <li><span class="mk">✓</span><span>docpilot 전체를 단일 이미지로 컨테이너화·kind 로드</span></li>
+              <li><span class="mk">✓</span><span>Namespace/ConfigMap/Secret으로 설정·비밀 외부화</span></li>
+              <li><span class="mk">✓</span><span>Postgres(pgvector) + web Deployment 함께 Running</span></li>
+              <li><span class="mk">✓</span><span>probe·resources·HPA·Ingress로 운영형 배포</span></li>
+              <li><span class="mk">✓</span><span>구조화 로그 + <code class="inl">/metrics</code> 관측성 확보</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">./smoke.sh</code>가 <code class="inl">/health→/ask→/report</code> 통과</span></li>
+              <li><span class="mk">✓</span><span>(팀) 몰입형 프로젝트 기획서 작성</span></li>
+            </ul>
+          </div>
+        </div>
+        <p class="note"><b>개인 제출물</b>: 통합 배포 증빙 — <code class="inl">kubectl get all -n docpilot</code> 출력 + <code class="inl">SMOKE TEST PASSED</code> 로그를 담은 <code class="inl">week12-배포증빙.md</code>. 평가 기준·루브릭은 <b>[평가와 몰입형 프로젝트]</b> 문서 확인.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 24. 12주 여정 회고 & 마무리 (피날레) -->
+  <section class="slide t-finale" aria-label="12주 여정 회고와 마무리">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.44" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <svg class="motif motif--branch float-motif" style="--mo:0.28" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M30 30C60 60 60 100 40 140C70 120 110 120 150 150C120 110 120 70 150 40C110 60 70 60 30 30Z"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Finale · 12주 여정 회고</div>
+        <h2 class="head" style="font-size:var(--title-size)"><code class="inl" style="font-size:0.5em">Hello, DocPilot</code> 로컬 웹앱이 —<br/><span class="accent">K8s 위 Multi-Agent 서비스</span>로</h2>
+        <div class="journey" style="max-width:min(97vw,1100px)">
+          <div class="blk b1"><span class="tag">블록 1 · 1–5주</span><span class="desc">로컬 웹앱 → 컨테이너 → Compose+DB → K8s → <b>운영형 배포</b></span></div>
+          <div class="blk b2"><span class="tag">블록 2 · 6–8주</span><span class="desc">LLM 챗 → 멀티모달/HF → <b>RAG</b></span></div>
+          <div class="blk b3"><span class="tag">블록 3 · 9–11주</span><span class="desc">단일 Agent → 도구·MCP → <b>Multi-Agent</b></span></div>
+          <div class="blk bf"><span class="tag">통합 · 12주</span><span class="desc">전체 K8s 통합 배포 + 관측성 + <b>프로젝트 킥오프</b></span></div>
+        </div>
+        <p class="hero-line" style="max-width:74ch">버린 코드 없이 <b style="color:var(--ink)">매주 같은 프로젝트를 키워 온</b> 결과다. 이제 이 역량을 <b style="color:var(--ink)">4주 몰입형 프로젝트</b>에서 팀 단위로 증명한다 — docpilot을 발판 삼아, 여러분의 문제를 푸는 Agentic AI 서비스를 만들고 배포하고 발표하자.</p>
+        <div class="hero-evo" style="margin-top:0.2em">
+          <span class="chip" style="border-color:var(--terracotta-deep);background:color-mix(in srgb,var(--terracotta) 20%,var(--paper))">수고했습니다 🍂</span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--sage) 26%,var(--paper))">몰입 4주, 세상에 올린다</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
