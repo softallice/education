@@ -1,0 +1,1420 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 10 — 도구·데이터 연동과 MCP</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01~09 덱과 동일한 디자인 시스템 계승 (Block 3)
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 코드 블록 조밀 변형 (긴 코드 대응) */
+.code pre.dense { font-size: clamp(0.6rem, 0.98vw, 0.86rem); line-height: 1.5; }
+.code pre.xdense { font-size: clamp(0.54rem, 0.88vw, 0.78rem); line-height: 1.45; }
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* 파이프라인 흐름 (개념 개요) */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; font-family: var(--font-mono); font-size: var(--small-size); }
+.flow .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.75em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.flow .st.now { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight: 800; border-color: var(--plum-deep); }
+.flow .st.fin { background: color-mix(in srgb, var(--sage) 30%, var(--paper)); color: var(--ink); font-weight: 700; }
+.flow .ar { color: var(--accent); font-weight: 800; }
+
+/* 도구/스텝 스트립 */
+.reqstrip { display: flex; flex-wrap: wrap; gap: 5px; }
+.reqstrip span {
+  font-family: var(--font-mono); font-size: var(--micro-size); font-weight: 800;
+  padding: 0.2em 0.5em; border-radius: 6px;
+  background: color-mix(in srgb, var(--plum) 32%, var(--paper)); color: var(--plum-deep);
+  border: 1px solid color-mix(in srgb, var(--plum-deep) 38%, transparent);
+}
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+/* 파이프 계단 (개념) */
+.pipe { display:flex; flex-direction:column; gap:6px; font-family: var(--font-mono); font-size: var(--small-size); }
+.pipe .row { display:flex; flex-wrap:wrap; align-items:center; gap:0.45em; }
+.pipe .lbl { font-weight:800; color: var(--accent); min-width: 6.5em; }
+.pipe .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 9px; padding: 0.3em 0.65em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.pipe .st.hot { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight:800; border-color: var(--plum-deep); }
+.pipe .ar { color: var(--accent); font-weight:800; }
+
+/* MCP 연결 다이어그램 */
+.mcpdia { display:grid; grid-template-columns: 1fr 1fr; gap: clamp(0.7rem,1.6vw,1.4rem); font-family: var(--font-mono); font-size: var(--small-size); }
+.mcpdia .col { display:flex; flex-direction:column; gap:0.5em; }
+.mcpdia .apps { display:flex; flex-direction:column; gap:0.35em; }
+.mcpdia .node { background: var(--paper); border:1px solid rgba(120,78,46,0.15); border-radius:9px; padding:0.3em 0.6em; box-shadow: var(--shadow-soft); color: var(--ink-soft); text-align:center; }
+.mcpdia .node.hub { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight:800; border-color: var(--plum-deep); }
+.mcpdia .node.tgt { background: color-mix(in srgb, var(--sage) 26%, var(--paper)); color: var(--ink); font-weight:700; }
+.mcpdia .lines { color: var(--accent); font-weight:800; text-align:center; letter-spacing:-0.05em; }
+
+/* 실전 도구 요소 태그 (Tools/Resources/Prompts) */
+.react { display:flex; flex-direction:column; gap:0.4em; font-family: var(--font-mono); font-size: var(--small-size); line-height:1.4; }
+.react .ln { display:flex; gap:0.6em; align-items:baseline; }
+.react .tag { flex:none; font-weight:800; min-width:5.4em; }
+.react .t-th { color: var(--plum-deep); }
+.react .t-ac { color: var(--coral-deep); }
+.react .t-ob { color: var(--sage-deep); }
+.react .t-an { color: var(--terracotta-deep); }
+.react .val { color: var(--ink); }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3, .grid-4, .mcpdia { grid-template-columns: 1fr; }
+  .nav-dots { display: none; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 10</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">23</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-autumn-b" aria-label="타이틀">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · Block 3 · Agentic 서비스</span>
+      <div class="eyebrow">Week 10 — 도구·데이터 연동과 MCP</div>
+      <h1 class="title">도구를 쥐여주다 —<br/><span style="color:var(--accent)">실전 도구·MCP</span></h1>
+      <p class="hero-line">week09의 <b style="color:var(--ink)">장난감 도구</b>가 이제 실제 <b style="color:var(--ink)">REST API·PostgreSQL·파일 시스템</b>에 연결된다. 타임아웃·재시도·입력검증 <b style="color:var(--ink)">가드레일</b>을 두르고, <b style="color:var(--ink)">MCP 서버</b>로 docpilot 도구를 노출해 어떤 클라이언트든 표준 방식으로 호출하게 만든다.</p>
+      <div class="hero-evo">
+        <span class="chip">W09 <code class="inl" style="background:none;color:var(--teal)">/agent</code> · 순수 함수 도구</span>
+        <span class="arrow">→</span>
+        <span class="chip">실전 연동 · 가드레일 · <code class="inl" style="background:none;color:var(--teal)">MCP</code></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-autumn-b" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.35" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:96ch">
+          <li><span class="mk">1</span><span>도구를 <b>실제 외부 리소스</b>(REST API·DB·파일)에 연결한다.</span></li>
+          <li><span class="mk">2</span><span>신뢰성 가드레일 — <b>타임아웃 · 재시도 · 입력검증 · 에러 처리</b>를 도구에 두른다.</span></li>
+          <li><span class="mk">3</span><span>파일·경로 도구의 <b>path traversal</b>, DB의 <b>SQL 인젝션</b> 위험을 막는다.</span></li>
+          <li><span class="mk">4</span><span><b>MCP(Model Context Protocol)</b>가 무엇이고 왜 표준이 필요한지 설명한다.</span></li>
+          <li><span class="mk">5</span><span>Python으로 <b>MCP 서버</b>를 만들어 docpilot 도구를 노출한다.</span></li>
+          <li><span class="mk">6</span><span><b>MCP 클라이언트</b>로 서버에 붙어 도구를 나열·호출한다.</span></li>
+          <li><span class="mk">7</span><span>이 단계가 곧 <b>Agentic 서비스</b>임을 이해한다.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 개요 / 이번 주 지도 -->
+  <section class="slide t-autumn-b" aria-label="개념 개요">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 / 이번 주 지도 — Block 3 계속</div>
+        <h2 class="head">장난감 도구를 <span class="accent">실전으로, 그리고 표준으로</span></h2>
+        <div class="flow">
+          <span class="st fin">week09 Agent<br/>(순수 함수 도구)</span><span class="ar">→</span>
+          <span class="st now">week10 실전 도구<br/>(API·DB·파일 + 가드레일)</span><span class="ar">→</span>
+          <span class="st">MCP 서버로 노출</span>
+        </div>
+        <div class="grid grid-4" style="max-width:min(97vw,1180px)">
+          <div class="card"><b style="color:var(--accent)">① 실패 전제</b><p class="lead" style="margin-top:0.25em">실제 연동은 느려지고·죽고·공격받는다</p></div>
+          <div class="card"><b style="color:var(--accent)">② 가드레일 4종</b><p class="lead" style="margin-top:0.25em">타임아웃·재시도·입력검증·에러처리</p></div>
+          <div class="card"><b style="color:var(--accent)">③ 실전 도구 3종</b><p class="lead" style="margin-top:0.25em">환율 API · DB 검색 · 파일 읽기</p></div>
+          <div class="card"><b style="color:var(--accent)">④ MCP</b><p class="lead" style="margin-top:0.25em">도구를 표준 프로토콜로 노출</p></div>
+        </div>
+        <p class="note">5부 구성: <b>1부 REST API → 2부 DB 조회 → 3부 파일 읽기 → 4부 MCP 서버 → 5부 MCP 클라이언트</b>. 핵심 원칙 하나 — <b>도구는 예외로 죽지 않고 <code class="inl">{"error": ...}</code>로 실패를 모델에 돌려준다.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ① 실전 연동은 실패한다 -->
+  <section class="slide t-autumn-b" aria-label="실전 연동은 실패한다">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ① / 실전 연동은 "실패한다"는 전제에서 시작</div>
+        <h2 class="head">순수 함수는 항상 성공했다. <span class="accent">실제는 다르다</span></h2>
+        <div class="grid grid-3" style="max-width:min(97vw,1180px)">
+          <div class="card">
+            <span class="pill">REST API</span>
+            <p class="lead" style="margin-top:0.5em">느려지거나(타임아웃), 5xx로 죽거나, rate limit(<b>429</b>)에 걸린다.</p>
+          </div>
+          <div class="card">
+            <span class="pill">DB</span>
+            <p class="lead" style="margin-top:0.5em">커넥션이 끊기고, 잘못된 쿼리는 <b>인젝션 위험</b>을 낳는다.</p>
+          </div>
+          <div class="card">
+            <span class="pill">파일</span>
+            <p class="lead" style="margin-top:0.5em">경로 조작으로 <code class="inl">/etc/passwd</code>를 읽으려는 <b>path traversal</b>이 온다.</p>
+          </div>
+        </div>
+        <div class="warn" style="max-width:min(97vw,1180px);align-self:center;width:100%">
+          <p class="lead" style="color:var(--ink);font-weight:600">Agent에서는 <b style="color:var(--accent)">인자를 LLM이 생성</b>하므로 위험이 더 크다. 모델이 만든 인자를 절대 신뢰하지 말고 <b>시스템 경계에서 검증</b>한다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ② 가드레일 4종 -->
+  <section class="slide t-autumn-b" aria-label="가드레일 4종">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ② / 신뢰성 가드레일 4종</div>
+        <h2 class="head">실패를 <span class="accent">관찰 가능한 결과</span>로 바꾼다</h2>
+        <table class="tbl" style="max-width:min(97vw,1180px)">
+          <thead><tr><th style="width:18%">가드레일</th><th style="width:36%">목적</th><th>구현</th></tr></thead>
+          <tbody>
+            <tr><td class="em">타임아웃</td><td>느린 외부 호출이 전체를 멈추지 않게</td><td><code>httpx.Client(timeout=...)</code>, DB <code>statement_timeout</code></td></tr>
+            <tr><td class="em">재시도</td><td>일시적 오류(네트워크·429·5xx) 회복</td><td><code>tenacity</code> 지수 백오프</td></tr>
+            <tr><td class="em">입력검증</td><td>LLM이 만든 인자 방어</td><td>허용 목록(allowlist), 파라미터 바인딩, 경로 정규화</td></tr>
+            <tr><td class="em">에러 처리</td><td>실패를 <b>모델에게 구조화해 전달</b> → 회복 유도</td><td><code>{"error": "..."}</code> 형태로 반환(예외로 죽지 않음)</td></tr>
+          </tbody>
+        </table>
+        <p class="note">핵심 원칙: <b>도구는 예외를 던져 프로세스를 죽이지 않고, 실패를 결과로 모델에 돌려준다.</b> 그래야 agent가 다른 도구로 우회하거나 사용자에게 상황을 설명할 수 있다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ③ MCP - 왜 표준이 필요한가 -->
+  <section class="slide t-autumn-b" aria-label="MCP 왜 표준이 필요한가">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ③ / MCP — 왜 표준이 필요한가</div>
+        <h2 class="head">N×M 통합 지옥을, <span class="accent">USB-C 하나로</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <span class="pill" style="background:color-mix(in srgb,var(--coral) 30%,var(--paper));color:var(--coral-deep);border-color:var(--coral-deep)">MCP 없이</span>
+            <div class="mcpdia" style="margin-top:0.7em;grid-template-columns:1fr auto">
+              <div class="apps"><span class="node">App A</span><span class="node">App B</span><span class="node">App C</span></div>
+              <div class="lines" style="display:grid;place-items:center">→ 도구마다<br/>개별 통합</div>
+            </div>
+            <p class="lead" style="margin-top:0.6em">Gemini·Claude·LangGraph에 다시 쓰려면 각자 포맷으로 재작성. <b>N개 모델 × M개 도구 = N×M</b>.</p>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <span class="pill">MCP</span>
+            <div class="mcpdia" style="margin-top:0.7em;grid-template-columns:1fr auto auto">
+              <div class="apps"><span class="node">App A</span><span class="node">App B</span><span class="node">App C</span></div>
+              <div class="lines" style="display:grid;place-items:center">→</div>
+              <div style="display:grid;place-items:center;gap:0.35em"><span class="node hub">MCP Server</span><span class="node tgt">도구·DB·파일</span></div>
+            </div>
+            <p class="lead" style="margin-top:0.6em">한 번 서버로 만들면 MCP를 지원하는 <b>모든 클라이언트</b>가 같은 방식(JSON-RPC 표준)으로 도구를 발견·호출한다.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 개념 ④ MCP 3요소 + transport -->
+  <section class="slide t-autumn-b" aria-label="MCP 3요소와 전송">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ④ / MCP 서버가 노출하는 3가지 + 전송</div>
+        <h2 class="head">Tools · Resources · Prompts, <span class="accent">이번 주는 Tools</span></h2>
+        <div class="grid grid-3" style="max-width:min(97vw,1180px)">
+          <div class="card" style="border:1px solid color-mix(in srgb,var(--plum-deep) 40%,transparent)"><b style="color:var(--accent)">Tools</b><p class="lead" style="margin-top:0.35em">실행 가능한 함수. <b>이번 주 집중</b> — 환율·DB·파일 도구를 노출.</p></div>
+          <div class="card"><b style="color:var(--accent)">Resources</b><p class="lead" style="margin-top:0.35em">읽을 수 있는 데이터. 클라이언트가 참조하는 컨텍스트.</p></div>
+          <div class="card"><b style="color:var(--accent)">Prompts</b><p class="lead" style="margin-top:0.35em">재사용 프롬프트 템플릿. 반복 작업의 표준화.</p></div>
+        </div>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="callout" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+            <b style="color:var(--accent);font-size:var(--small-size)">전송(transport)</b>
+            <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">로컬은 <b>stdio</b>(클라이언트가 서버를 자식 프로세스로 실행), 원격은 <b>HTTP</b>. 이번 주 실습은 <code class="inl">stdio</code>.</p>
+          </div>
+          <div class="note" style="align-self:center">week09에서 손으로 쓰던 OpenAI JSON Schema를 MCP에선 <b>SDK가 자동 생성</b>한다. 도구 정의를 한 곳에서 관리하고 재사용한다.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 사전 준비 -->
+  <section class="slide t-autumn-b" aria-label="사전 준비">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">사전 준비 / 부품 확인</div>
+        <h2 class="head">week09 산출물 + <span class="accent">DB · 데이터 디렉터리</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="grid grid-2">
+              <div class="card">
+                <span class="pill">지난주 산출물</span>
+                <p class="lead" style="margin-top:0.4em">week09의 <code class="inl">agent/tools.py</code>, <code class="inl">raw_agent.py</code>, <code class="inl">/agent</code> 엔드포인트가 동작.</p>
+              </div>
+              <div class="card">
+                <span class="pill">DB</span>
+                <p class="lead" style="margin-top:0.4em">week03 compose로 띄운 PostgreSQL. 이번 주는 <code class="inl">documents</code>와 별개인 <b><code class="inl">kb_documents</code></b> 테이블을 쓴다.</p>
+              </div>
+            </div>
+            <div class="callout" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">키·접속정보는 환경변수로만</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">Python 3.12. API 키·DB DSN은 <b>코드 하드코딩 금지</b>. <code class="inl">.env</code> + <code class="inl">get_settings()</code> 기준(shell <code class="inl">export</code>도 python-dotenv와 호환).</p>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 의존성 + 환경변수 (docpilot 루트)</span></div>
+<pre class="dense"><span class="tok-cmd">cd</span> <span class="tok-fl">docpilot</span> <span class="tok-op">&amp;&amp;</span> <span class="tok-cmd">source</span> <span class="tok-fl">.venv/bin/activate</span>
+<span class="tok-cmd">pip</span> install <span class="tok-st">"httpx&gt;=0.27" "tenacity&gt;=8.3"</span> \
+    <span class="tok-st">"psycopg[binary]&gt;=3.2" "mcp&gt;=1.2"</span>
+
+<span class="tok-cm"># 외부 연동에 쓸 환경변수 (예시)</span>
+<span class="tok-cmd">export</span> <span class="tok-kw">DOCPILOT_DB_DSN</span>=<span class="tok-st">"postgresql://docpilot:docpilot@localhost:5432/docpilot"</span>
+<span class="tok-cmd">export</span> <span class="tok-kw">DOCPILOT_DATA_DIR</span>=<span class="tok-st">"$(pwd)/data"</span>   <span class="tok-cm"># 파일 도구 sandbox</span>
+<span class="tok-cmd">mkdir</span> -p <span class="tok-st">"$DOCPILOT_DATA_DIR"</span>
+<span class="tok-cmd">echo</span> <span class="tok-st">"docpilot 사용 설명서..."</span> &gt; <span class="tok-st">"$DOCPILOT_DATA_DIR/manual.txt"</span></pre>
+            </div>
+            <div class="note">확인: <code class="inl">python -c "import httpx, tenacity, psycopg, mcp; print('ok')"</code> → <code class="inl">ok</code>. <code class="inl">cat "$DOCPILOT_DATA_DIR/manual.txt"</code> → 방금 쓴 문장.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 실습 로드맵 -->
+  <section class="slide t-autumn-b" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기</div>
+        <h2 class="head">5부 · <span class="accent">API → DB → 파일 → MCP 서버 → 클라이언트</span></h2>
+        <div class="grid" style="grid-template-columns:repeat(5,1fr);max-width:min(97vw,1200px)">
+          <div class="card"><span class="step-badge"><span class="num">1</span>REST API</span><p class="lead" style="margin-top:0.5em">환율 도구<br/>타임아웃 + 재시도</p></div>
+          <div class="card"><span class="step-badge"><span class="num">2</span>DB 조회</span><p class="lead" style="margin-top:0.5em"><code class="inl">kb_documents</code><br/>파라미터 바인딩</p></div>
+          <div class="card"><span class="step-badge"><span class="num">3</span>파일 읽기</span><p class="lead" style="margin-top:0.5em">sandbox<br/>path traversal 방어</p></div>
+          <div class="card" style="border:1px solid color-mix(in srgb,var(--plum-deep) 40%,transparent)"><span class="step-badge"><span class="num">4</span>MCP 서버</span><p class="lead" style="margin-top:0.5em">FastMCP<br/><code class="inl">@mcp.tool()</code></p></div>
+          <div class="card"><span class="step-badge"><span class="num">5</span>클라이언트</span><p class="lead" style="margin-top:0.5em">stdio_client<br/>list/call</p></div>
+        </div>
+        <p class="note"><b>필수 경로는 1~5부(7단계)</b>에서 끝난다. Claude Desktop 연동(8단계)은 <b>선택/도전</b>이다. 모든 실전 도구는 <code class="inl">agent/real_tools.py</code>에 이어서 추가한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 프로젝트 구조 -->
+  <section class="slide t-autumn-b" aria-label="프로젝트 구조">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">실습 준비 / 프로젝트 구조</div>
+        <h2 class="head">docpilot에 <span class="accent">real_tools · mcp_server</span> 추가</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">docpilot/ — 디렉터리 구조</span></div>
+<pre class="dense"><span class="tok-fl">docpilot/</span>
+├── <span class="tok-fl">agent/</span>
+│   ├── <span class="tok-fl">tools.py</span>            <span class="tok-cm"># week09</span>
+│   ├── <span class="tok-fl">real_tools.py</span>       <span class="tok-cm"># 실전 도구 + 가드레일 ←</span>
+│   └── <span class="tok-fl">raw_agent.py</span>        <span class="tok-cm"># week09 (실전 도구 등록)</span>
+├── <span class="tok-fl">mcp_server/</span>
+│   └── <span class="tok-fl">server.py</span>           <span class="tok-cm"># 4부: MCP 서버 ←</span>
+├── <span class="tok-fl">mcp_client_demo.py</span>      <span class="tok-cm"># 5부: 클라이언트 데모 ←</span>
+└── <span class="tok-fl">seed.sql</span>                <span class="tok-cm"># kb_documents 시드</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — MCP 서버 패키지 디렉터리</span></div>
+<pre class="dense"><span class="tok-cmd">mkdir</span> <span class="tok-fl">-p mcp_server</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">한 파일, 세 도구</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">환율·DB·파일 도구를 모두 <code class="inl">agent/real_tools.py</code>에 이어 붙이고, 하나의 레지스트리·스키마로 관리한다. MCP 서버는 이 함수들을 그대로 import해 노출한다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 1부 REST API 도구 -->
+  <section class="slide t-autumn-b" aria-label="1부 REST API 환율 도구">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 1단계 · 핵심</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">real_tools.py</code> — <span class="accent">환율 API (타임아웃 + 재시도)</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py — 재시도 + 실제 호출</span></div>
+<pre class="xdense"><span class="tok-kw">import</span> httpx
+<span class="tok-kw">from</span> tenacity <span class="tok-kw">import</span> (retry, retry_if_exception_type,
+    stop_after_attempt, wait_exponential)
+
+HTTP_TIMEOUT_SECONDS = <span class="tok-nm">5.0</span>
+MAX_RETRIES = <span class="tok-nm">3</span>
+ALLOWED_CURRENCIES = {<span class="tok-st">"USD"</span>,<span class="tok-st">"EUR"</span>,<span class="tok-st">"KRW"</span>,<span class="tok-st">"JPY"</span>,<span class="tok-st">"GBP"</span>,<span class="tok-st">"CNY"</span>}
+
+
+<span class="tok-kw">@retry</span>(
+    retry=retry_if_exception_type(httpx.HTTPError),
+    stop=stop_after_attempt(MAX_RETRIES),
+    wait=wait_exponential(multiplier=<span class="tok-nm">0.5</span>, max=<span class="tok-nm">4</span>),
+    reraise=<span class="tok-kw">True</span>,
+)
+<span class="tok-kw">def</span> <span class="tok-fn">_fetch_rate</span>(base: <span class="tok-fl">str</span>, target: <span class="tok-fl">str</span>) -&gt; <span class="tok-fl">float</span>:
+    url = <span class="tok-st">"https://api.frankfurter.app/latest"</span>
+    <span class="tok-kw">with</span> httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) <span class="tok-kw">as</span> c:
+        resp = c.get(url, params={<span class="tok-st">"from"</span>: base, <span class="tok-st">"to"</span>: target})
+        resp.raise_for_status()   <span class="tok-cm"># 4xx/5xx → 재시도</span>
+        data = resp.json()
+    <span class="tok-kw">return</span> <span class="tok-fn">float</span>(data[<span class="tok-st">"rates"</span>][target])</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py — 입력검증 + 에러 반환</span></div>
+<pre class="xdense"><span class="tok-kw">def</span> <span class="tok-fn">get_exchange_rate</span>(base: <span class="tok-fl">str</span>, target: <span class="tok-fl">str</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""base 1단위의 target 환율. 예: 'USD','KRW'."""</span>
+    base, target = base.upper(), target.upper()
+    <span class="tok-cm"># 입력검증: 허용된 통화만 (LLM 인자 방어)</span>
+    <span class="tok-kw">if</span> base <span class="tok-kw">not in</span> ALLOWED_CURRENCIES \
+       <span class="tok-kw">or</span> target <span class="tok-kw">not in</span> ALLOWED_CURRENCIES:
+        <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">"지원하지 않는 통화입니다."</span>}
+    <span class="tok-kw">try</span>:
+        rate = _fetch_rate(base, target)
+        <span class="tok-kw">return</span> {<span class="tok-st">"base"</span>: base, <span class="tok-st">"target"</span>: target,
+                <span class="tok-st">"rate"</span>: rate}
+    <span class="tok-kw">except</span> <span class="tok-fn">Exception</span> <span class="tok-kw">as</span> exc:  <span class="tok-cm"># 재시도 소진·타임아웃</span>
+        <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">f"환율 조회 실패: {exc}"</span>}</pre>
+          </div>
+        </div>
+        <div class="note">키가 필요 없는 공개 API(<code class="inl">frankfurter.app</code>). <b>왜 에러를 dict로?</b> 예외를 그대로 던지면 agent 루프가 죽는다. <code class="inl">{"error": ...}</code>면 모델이 실패를 설명하거나 다른 방법을 시도할 수 있다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 2부 DB 시드 -->
+  <section class="slide t-autumn-b" aria-label="2부 DB 시드">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 2단계 · (필요 시) DB 시드</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">kb_documents</code> — <span class="accent">week03과 분리된 별도 테이블</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">seed.sql</span></div>
+<pre class="dense"><span class="tok-kw">CREATE TABLE IF NOT EXISTS</span> <span class="tok-fn">kb_documents</span> (
+    id          <span class="tok-kw">SERIAL PRIMARY KEY</span>,
+    title       <span class="tok-kw">TEXT NOT NULL</span>,
+    content     <span class="tok-kw">TEXT NOT NULL</span>,
+    created_at  <span class="tok-kw">TIMESTAMPTZ NOT NULL DEFAULT</span> now()
+);
+
+<span class="tok-kw">INSERT INTO</span> kb_documents (title, content) <span class="tok-kw">VALUES</span>
+  (<span class="tok-st">'환불 정책'</span>, <span class="tok-st">'구매 후 7일 이내 전액 환불이 가능합니다.'</span>),
+  (<span class="tok-st">'요금제 안내'</span>, <span class="tok-st">'docpilot 프리미엄 요금제는 월 29,000원입니다.'</span>),
+  (<span class="tok-st">'세금 정책'</span>, <span class="tok-st">'docpilot의 부가세율은 10%로 계산합니다.'</span>);</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 시드 적용 & 확인</span></div>
+<pre class="dense"><span class="tok-cmd">psql</span> <span class="tok-st">"$DOCPILOT_DB_DSN"</span> -f seed.sql
+
+<span class="tok-cmd">psql</span> <span class="tok-st">"$DOCPILOT_DB_DSN"</span> \
+  -c <span class="tok-st">"SELECT count(*) FROM kb_documents;"</span>
+<span class="tok-cm"># → 3 이상</span></pre>
+            </div>
+            <div class="warn" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">왜 별도 테이블?</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">week03의 <code class="inl">documents</code>는 스키마가 다르다. 이름 충돌을 피하려고 이번 주 도구 전용 <b><code class="inl">kb_documents</code></b>를 쓴다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. 2부 DB 조회 도구 -->
+  <section class="slide t-autumn-b" aria-label="2부 DB 조회 도구">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 3단계 · 핵심</div>
+        <h2 class="head">DB 조회 — <span class="accent">파라미터 바인딩으로 인젝션 원천 차단</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py (이어서 추가)</span></div>
+<pre class="xdense"><span class="tok-kw">import</span> psycopg
+
+DB_DSN = os.getenv(<span class="tok-st">"DOCPILOT_DB_DSN"</span>, <span class="tok-st">"postgresql://..."</span>)
+DB_TIMEOUT_MS = <span class="tok-nm">3000</span>
+MAX_DB_ROWS = <span class="tok-nm">20</span>
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">search_documents_db</span>(keyword: <span class="tok-fl">str</span>, limit: <span class="tok-fl">int</span> = <span class="tok-nm">5</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""kb_documents에서 keyword가 포함된 행 검색."""</span>
+    keyword = (keyword <span class="tok-kw">or</span> <span class="tok-st">""</span>).strip()
+    <span class="tok-kw">if not</span> keyword:
+        <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">"keyword가 비어 있습니다."</span>}
+    limit = <span class="tok-fn">max</span>(<span class="tok-nm">1</span>, <span class="tok-fn">min</span>(<span class="tok-fn">int</span>(limit), MAX_DB_ROWS))  <span class="tok-cm"># clamp</span>
+    <span class="tok-kw">try</span>:
+        <span class="tok-kw">with</span> psycopg.connect(DB_DSN, connect_timeout=<span class="tok-nm">3</span>,
+            options=<span class="tok-st">f"-c statement_timeout={DB_TIMEOUT_MS}"</span>) <span class="tok-kw">as</span> conn:
+            <span class="tok-kw">with</span> conn.cursor() <span class="tok-kw">as</span> cur:</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py — %s 바인딩 (f-string 금지!)</span></div>
+<pre class="xdense">                cur.execute(
+                    <span class="tok-st">"""
+                    SELECT id, title, content
+                    FROM kb_documents
+                    WHERE title ILIKE %(kw)s
+                       OR content ILIKE %(kw)s
+                    ORDER BY id LIMIT %(lim)s
+                    """</span>,
+                    {<span class="tok-st">"kw"</span>: <span class="tok-st">f"%{keyword}%"</span>, <span class="tok-st">"lim"</span>: limit},
+                )
+                rows = cur.fetchall()
+        <span class="tok-kw">return</span> {<span class="tok-st">"count"</span>: <span class="tok-fn">len</span>(rows),
+                <span class="tok-st">"rows"</span>: [{<span class="tok-st">"id"</span>: r[<span class="tok-nm">0</span>], <span class="tok-st">"title"</span>: r[<span class="tok-nm">1</span>],
+                          <span class="tok-st">"content"</span>: r[<span class="tok-nm">2</span>]} <span class="tok-kw">for</span> r <span class="tok-kw">in</span> rows]}
+    <span class="tok-kw">except</span> <span class="tok-fn">Exception</span> <span class="tok-kw">as</span> exc:
+        <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">f"DB 조회 실패: {exc}"</span>}</pre>
+          </div>
+        </div>
+        <div class="warn" style="max-width:min(97vw,1180px);align-self:center;width:100%;padding:clamp(0.6rem,1.3vw,1.1rem)">
+          <p class="lead" style="color:var(--ink);font-weight:600;font-size:var(--small-size)">인젝션 방어 핵심: <b style="color:var(--accent)"><code class="inl">keyword</code>가 <code class="inl">'; DROP TABLE ...; --</code>여도</b> 파라미터 바인딩이면 값으로만 취급되어 안전하다. LLM이 만든 문자열을 SQL에 직접 넣지 않는다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 3부 파일 읽기 도구 -->
+  <section class="slide t-autumn-b" aria-label="3부 파일 읽기 도구">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 4단계 · 핵심</div>
+        <h2 class="head">파일 읽기 — <span class="accent">sandbox 안에서만 (path traversal 방어)</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py (이어서 추가)</span></div>
+<pre class="xdense"><span class="tok-kw">from</span> pathlib <span class="tok-kw">import</span> Path
+
+DATA_DIR = Path(os.getenv(<span class="tok-st">"DOCPILOT_DATA_DIR"</span>,
+                          <span class="tok-st">"./data"</span>)).resolve()
+MAX_FILE_BYTES = <span class="tok-nm">100_000</span>
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">read_file</span>(relative_path: <span class="tok-fl">str</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""DATA_DIR 내부 텍스트 파일만 읽는다."""</span>
+    <span class="tok-kw">try</span>:
+        <span class="tok-cm"># 정규화 후 sandbox 루트 안인지 검증 (../ 차단)</span>
+        target = (DATA_DIR / relative_path).resolve()
+        <span class="tok-kw">if not</span> target.is_relative_to(DATA_DIR):
+            <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">"허용된 디렉터리 밖의 경로입니다."</span>}
+        <span class="tok-kw">if not</span> target.is_file():
+            <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">f"파일이 없습니다: {relative_path}"</span>}
+        <span class="tok-kw">if</span> target.stat().st_size &gt; MAX_FILE_BYTES:
+            <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">"파일이 너무 큽니다(100KB 초과)."</span>}
+        <span class="tok-kw">return</span> {<span class="tok-st">"path"</span>: relative_path,
+                <span class="tok-st">"content"</span>: target.read_text(encoding=<span class="tok-st">"utf-8"</span>)}
+    <span class="tok-kw">except</span> <span class="tok-fn">Exception</span> <span class="tok-kw">as</span> exc:
+        <span class="tok-kw">return</span> {<span class="tok-st">"error"</span>: <span class="tok-st">f"파일 읽기 실패: {exc}"</span>}</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 정상 읽기 & traversal 차단 확인</span></div>
+<pre class="xdense"><span class="tok-cmd">python</span> -c <span class="tok-st">"from agent.real_tools import read_file; \
+print(read_file('manual.txt')); \
+print(read_file('../../../etc/passwd'))"</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+<pre style="margin-top:0.4em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word">{'path': 'manual.txt', 'content': 'docpilot ...'}
+{'error': '허용된 디렉터리 밖의 경로입니다.'}</pre>
+            </div>
+            <div class="note"><code class="inl">../../../etc/passwd</code>가 <code class="inl">.resolve()</code> 정규화 검증에서 막혔다. 파일·경로를 다루는 모든 도구는 이런 sandbox 검증이 필수다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 3부 레지스트리 + 스키마 -->
+  <section class="slide t-autumn-b" aria-label="3부 레지스트리와 스키마">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 레지스트리 + 스키마 (week09 형식과 동일)</div>
+        <h2 class="head">세 도구를 <span class="accent">하나의 레지스트리·스키마</span>로</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py — 레지스트리</span></div>
+<pre class="dense">REAL_TOOL_REGISTRY = {
+    <span class="tok-st">"get_exchange_rate"</span>: get_exchange_rate,
+    <span class="tok-st">"search_documents_db"</span>: search_documents_db,
+    <span class="tok-st">"read_file"</span>: read_file,
+}</pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/real_tools.py — 스키마 (일부)</span></div>
+<pre class="xdense">REAL_TOOL_SCHEMAS = [
+  {<span class="tok-st">"type"</span>: <span class="tok-st">"function"</span>, <span class="tok-st">"function"</span>: {
+    <span class="tok-st">"name"</span>: <span class="tok-st">"get_exchange_rate"</span>,
+    <span class="tok-st">"description"</span>: <span class="tok-st">"두 통화 간 최신 환율을 조회한다."</span>,
+    <span class="tok-st">"parameters"</span>: {<span class="tok-st">"type"</span>: <span class="tok-st">"object"</span>, <span class="tok-st">"properties"</span>: {
+        <span class="tok-st">"base"</span>: {<span class="tok-st">"type"</span>: <span class="tok-st">"string"</span>},
+        <span class="tok-st">"target"</span>: {<span class="tok-st">"type"</span>: <span class="tok-st">"string"</span>}},
+      <span class="tok-st">"required"</span>: [<span class="tok-st">"base"</span>, <span class="tok-st">"target"</span>]}}},
+  <span class="tok-cm"># search_documents_db, read_file 스키마 동형 …</span>
+]</pre>
+          </div>
+        </div>
+        <div class="note">week09와 <b>정확히 같은 형식</b> — 함수·스키마·레지스트리 세 곳의 이름이 일치해야 agent가 도구를 찾는다. 스키마의 <code class="inl">description</code>이 모델의 도구 선택 정확도를 좌우한다.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. 3부 5단계 agent 등록 + 종합 실행 -->
+  <section class="slide t-autumn-b" aria-label="agent에 실전 도구 등록">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 5단계 · agent에 실전 도구 등록</div>
+        <h2 class="head">두 도구 세트를 <span class="accent">병합</span>하면 Agentic 서비스</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">agent/raw_agent.py (수정 — import·병합만)</span></div>
+<pre class="dense"><span class="tok-kw">from</span> agent.tools <span class="tok-kw">import</span> TOOL_REGISTRY, TOOL_SCHEMAS
+<span class="tok-kw">from</span> agent.real_tools <span class="tok-kw">import</span> (
+    REAL_TOOL_REGISTRY, REAL_TOOL_SCHEMAS)
+
+<span class="tok-cm"># 두 도구 세트를 병합</span>
+TOOL_REGISTRY = {**TOOL_REGISTRY, **REAL_TOOL_REGISTRY}
+TOOL_SCHEMAS  = [*TOOL_SCHEMAS, *REAL_TOOL_SCHEMAS]</pre>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 실전 도구를 엮는 질의</span></div>
+<pre class="xdense"><span class="tok-cmd">curl</span> -s -X POST http://localhost:8000/agent \
+  -H <span class="tok-st">"Content-Type: application/json"</span> \
+  -d <span class="tok-st">'{"query": "kb_documents에서 요금제를 찾아
+       그 금액을 USD로 환산하면 얼마야?"}'</span> \
+  | <span class="tok-cmd">python</span> -m json.tool</pre>
+            </div>
+          </div>
+          <div class="stack">
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 동작 (trace)</b>
+              <div class="pipe" style="margin-top:0.6em">
+                <div class="row"><span class="st hot">search_documents_db</span><span class="ar">→</span><span class="st hot">get_exchange_rate</span></div>
+                <div class="row"><span class="ar">→</span><span class="st hot">calculator</span><span class="ar">→</span><span class="st">answer(환산 금액)</span></div>
+              </div>
+              <p class="lead" style="margin-top:0.6em;font-size:var(--small-size)"><b>여러 실전 도구를 스스로 엮어</b> 작업을 수행 = <b style="color:var(--accent)">Agentic 서비스</b>.</p>
+            </div>
+            <div class="note">week09 서버가 떠 있어야 한다: <code class="inl">uvicorn app.main:app --reload</code>. import·병합만 바꿨을 뿐 <code class="inl">/agent</code> 루프 코드는 그대로다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 4부 MCP 서버 -->
+  <section class="slide t-autumn-b" aria-label="4부 MCP 서버">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">4부 · 6단계 · 핵심</div>
+        <h2 class="head">FastMCP — <span class="accent"><code class="inl" style="font-size:0.85em">@mcp.tool()</code> 하나로 도구 노출</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">mcp_server/server.py — stdio transport</span></div>
+<pre class="xdense"><span class="tok-kw">from</span> mcp.server.fastmcp <span class="tok-kw">import</span> FastMCP
+<span class="tok-kw">from</span> agent.real_tools <span class="tok-kw">import</span> (get_exchange_rate,
+    read_file, search_documents_db)
+
+mcp = FastMCP(<span class="tok-st">"docpilot-tools"</span>)
+
+
+<span class="tok-kw">@mcp.tool</span>()
+<span class="tok-kw">def</span> <span class="tok-fn">exchange_rate</span>(base: <span class="tok-fl">str</span>, target: <span class="tok-fl">str</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""두 통화 간 최신 환율을 조회한다."""</span>
+    <span class="tok-kw">return</span> get_exchange_rate(base, target)
+
+
+<span class="tok-kw">@mcp.tool</span>()
+<span class="tok-kw">def</span> <span class="tok-fn">documents_search</span>(keyword: <span class="tok-fl">str</span>, limit: <span class="tok-fl">int</span> = <span class="tok-nm">5</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""kb_documents를 키워드로 검색한다."""</span>
+    <span class="tok-kw">return</span> search_documents_db(keyword, limit)
+
+
+<span class="tok-kw">@mcp.tool</span>()
+<span class="tok-kw">def</span> <span class="tok-fn">data_file</span>(relative_path: <span class="tok-fl">str</span>) -&gt; <span class="tok-fl">dict</span>:
+    <span class="tok-st">"""데이터 디렉터리 안의 텍스트 파일을 읽는다."""</span>
+    <span class="tok-kw">return</span> read_file(relative_path)
+
+
+<span class="tok-kw">if</span> __name__ == <span class="tok-st">"__main__"</span>:
+    mcp.run(transport=<span class="tok-st">"stdio"</span>)</pre>
+          </div>
+          <div class="stack">
+            <div class="callout" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">자동 생성의 힘</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">@mcp.tool()</code> 하나로 도구의 <b>이름·설명(docstring)·파라미터 스키마(타입 힌트)</b>가 자동 생성된다. week09에서 손으로 쓰던 JSON Schema를 SDK가 대신 만든다.</p>
+            </div>
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — Inspector로 눈으로 확인 (Node 필요)</span></div>
+<pre class="xdense"><span class="tok-cmd">npx</span> @modelcontextprotocol/inspector \
+  <span class="tok-cmd">python</span> -m mcp_server.server</pre>
+            </div>
+            <div class="note">Inspector 웹 UI의 <b>Tools</b> 탭에 <code class="inl">exchange_rate</code>·<code class="inl">documents_search</code>·<code class="inl">data_file</code> 3개가 뜨고 폼으로 직접 호출된다. (Node 없이 넘어가도 5부에서 코드로 확인한다.)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 5부 MCP 클라이언트 -->
+  <section class="slide t-autumn-b" aria-label="5부 MCP 클라이언트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">5부 · 7단계 · 핵심 (필수 경로 종료 지점)</div>
+        <h2 class="head">클라이언트 — <span class="accent">stdio로 붙어 나열·호출</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">mcp_client_demo.py</span></div>
+<pre class="xdense"><span class="tok-kw">import</span> asyncio
+<span class="tok-kw">from</span> mcp <span class="tok-kw">import</span> ClientSession, StdioServerParameters
+<span class="tok-kw">from</span> mcp.client.stdio <span class="tok-kw">import</span> stdio_client
+
+<span class="tok-cm"># 서버를 어떻게 띄울지 지정 (파이썬 모듈)</span>
+SERVER = StdioServerParameters(command=<span class="tok-st">"python"</span>,
+    args=[<span class="tok-st">"-m"</span>, <span class="tok-st">"mcp_server.server"</span>])
+
+
+<span class="tok-kw">async def</span> <span class="tok-fn">main</span>() -&gt; <span class="tok-fl">None</span>:
+    <span class="tok-kw">async with</span> stdio_client(SERVER) <span class="tok-kw">as</span> (read, write):
+        <span class="tok-kw">async with</span> ClientSession(read, write) <span class="tok-kw">as</span> session:
+            <span class="tok-kw">await</span> session.initialize()
+            <span class="tok-cm"># (1) 도구 목록 — 표준 프로토콜로 발견</span>
+            tools = <span class="tok-kw">await</span> session.list_tools()
+            <span class="tok-kw">for</span> t <span class="tok-kw">in</span> tools.tools:
+                <span class="tok-fn">print</span>(<span class="tok-st">f"- {t.name}: {t.description}"</span>)
+            <span class="tok-cm"># (2) 도구 호출</span>
+            r = <span class="tok-kw">await</span> session.call_tool(
+                <span class="tok-st">"documents_search"</span>, {<span class="tok-st">"keyword"</span>: <span class="tok-st">"요금제"</span>})
+            <span class="tok-fn">print</span>(r.content[<span class="tok-nm">0</span>].text)
+
+
+asyncio.run(main())</pre>
+          </div>
+          <div class="stack">
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력 (요약)</b>
+<pre style="margin-top:0.4em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word">=== 사용 가능한 도구 ===
+- exchange_rate: 두 통화 간 최신 환율...
+- documents_search: kb_documents를 검색...
+- data_file: 데이터 디렉터리 파일 읽기...
+
+=== documents_search('요금제') ===
+{"count": 1, "rows": [{"id": 2,
+ "title": "요금제 안내", ...}]}</pre>
+            </div>
+            <div class="note"><b>표준화의 힘</b>: 클라이언트는 도구의 내부 구현을 전혀 몰라도 <code class="inl">list_tools()</code>로 발견하고 <code class="inl">call_tool()</code>로 호출했다. 같은 서버를 <b>Claude Desktop</b>에도 붙일 수 있다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 8단계 Claude Desktop (선택/도전) -->
+  <section class="slide t-autumn-b" aria-label="Claude Desktop 연동 선택 도전">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">8단계 · <span style="color:var(--plum-deep)">선택 / 도전</span></div>
+        <h2 class="head">Claude Desktop에 <span class="accent">docpilot 도구를 연결</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">claude_desktop_config.json</span></div>
+<pre class="xdense">{
+  <span class="tok-st">"mcpServers"</span>: {
+    <span class="tok-st">"docpilot-tools"</span>: {
+      <span class="tok-st">"command"</span>: <span class="tok-st">"python"</span>,
+      <span class="tok-st">"args"</span>: [<span class="tok-st">"-m"</span>, <span class="tok-st">"mcp_server.server"</span>],
+      <span class="tok-st">"cwd"</span>: <span class="tok-st">"/절대경로/docpilot"</span>,
+      <span class="tok-st">"env"</span>: {
+        <span class="tok-st">"DOCPILOT_DB_DSN"</span>: <span class="tok-st">"postgresql://..."</span>,
+        <span class="tok-st">"DOCPILOT_DATA_DIR"</span>: <span class="tok-st">"/절대경로/docpilot/data"</span>
+      }
+    }
+  }
+}</pre>
+          </div>
+          <div class="stack">
+            <div class="warn" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">선택 / 도전</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">필수 경로는 <b>7단계(Python 클라이언트)</b>에서 끝난다. Claude Desktop 연동은 외부 앱 설정이 필요한 심화이며 건너뛰어도 무방하다.</p>
+            </div>
+            <div class="callout" style="padding:clamp(0.7rem,1.4vw,1.2rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">재시작 후 입력창의 도구(🔨) 아이콘에 <code class="inl">docpilot-tools</code>가 보인다. "kb_documents에서 환불 정책 찾아줘" → <code class="inl">documents_search</code> 호출.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 실행 확인: 가드레일 3종 (성공/실패 케이스) -->
+  <section class="slide t-autumn-b" aria-label="가드레일 실행 확인">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실행 확인 / 가드레일이 실제로 막는가</div>
+        <h2 class="head">성공 케이스와 <span class="accent">차단 케이스</span>를 나란히</h2>
+        <div class="grid grid-3" style="max-width:min(97vw,1200px)">
+          <div class="card">
+            <span class="pill" style="background:color-mix(in srgb,var(--sage) 30%,var(--paper));color:var(--sage-deep);border-color:var(--sage-deep)">입력검증 (환율)</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">허용 목록 밖 통화</p>
+<pre style="margin-top:0.4em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word">get_exchange_rate('USD','BTC')
+→ {'error': '지원하지 않는 통화입니다.'}</pre>
+          </div>
+          <div class="card">
+            <span class="pill" style="background:color-mix(in srgb,var(--sage) 30%,var(--paper));color:var(--sage-deep);border-color:var(--sage-deep)">인젝션 (DB)</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">악성 keyword도 값으로만</p>
+<pre style="margin-top:0.4em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word">"'; DROP TABLE ...; --"
+→ 파라미터 바인딩 → 테이블 안전</pre>
+          </div>
+          <div class="card">
+            <span class="pill" style="background:color-mix(in srgb,var(--sage) 30%,var(--paper));color:var(--sage-deep);border-color:var(--sage-deep)">traversal (파일)</span>
+            <p class="lead" style="margin-top:0.5em;font-size:var(--small-size)">sandbox 밖 경로</p>
+<pre style="margin-top:0.4em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.5;white-space:pre-wrap;word-break:break-word">read_file('../../../etc/passwd')
+→ {'error': '허용된 디렉터리 밖...'}</pre>
+          </div>
+        </div>
+        <div class="warn" style="max-width:min(97vw,1200px);align-self:center;width:100%;padding:clamp(0.6rem,1.3vw,1.1rem)">
+          <p class="lead" style="color:var(--ink);font-weight:600;font-size:var(--small-size)">세 경우 모두 <b style="color:var(--accent)">예외로 죽지 않고</b> <code class="inl">{"error": ...}</code> 또는 안전한 결과를 돌려준다 — 그래서 agent가 계속 살아 다음 행동을 이어간다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 트러블슈팅 -->
+  <section class="slide t-autumn-b" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">막히면 <span class="accent">여기부터</span></h2>
+        <div class="card" style="max-width:min(97vw,1200px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:30%">증상</th><th style="width:28%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td class="em"><code>httpx.ConnectTimeout</code></td><td>외부 API 지연·네트워크</td><td><code>HTTP_TIMEOUT_SECONDS</code> 조정, 프록시면 <code>HTTPS_PROXY</code></td></tr>
+              <tr><td class="em">환율이 재시도만 하다 실패</td><td>API 다운/차단</td><td><code>{"error":...}</code>가 정상 동작. 오프라인이면 fallback 확장</td></tr>
+              <tr><td class="em"><code>psycopg.OperationalError</code></td><td>DB 미기동·DSN 오류</td><td>week03 compose로 기동, <code>psql "$DOCPILOT_DB_DSN" -c '\l'</code></td></tr>
+              <tr><td class="em"><code>read_file</code>이 정상 파일도 거부</td><td><code>DATA_DIR</code> 미설정/상대경로</td><td>환경변수를 절대경로로 export, <code>.resolve()</code> 확인</td></tr>
+              <tr><td class="em">MCP 클라이언트 무응답</td><td>서버 <code>command</code>/<code>cwd</code>·import 실패</td><td>먼저 <code>python -m mcp_server.server</code> 단독 기동 확인(stderr)</td></tr>
+              <tr><td class="em">Inspector <code>npx</code> 실패</td><td>Node 미설치</td><td>Node 18+ 설치, 또는 5부 Python 클라이언트로 대체</td></tr>
+              <tr><td class="em"><code>ModuleNotFoundError: mcp</code></td><td>미설치·venv 불일치</td><td><code>pip install "mcp>=1.2"</code>, venv activate 확인</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. 과제 + 체크리스트 -->
+  <section class="slide t-autumn-b" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / Block 3 — 평가 기준</div>
+        <h2 class="head">실전 도구를 <span class="accent">추가하고 MCP로 노출</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">제출물 (docpilot 리포 커밋/PR)</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.22rem,0.75vh,0.48rem)">
+              <li><span class="mk">1</span><span><b>실전 도구 1개 추가</b>: 공개 REST API 하나 더(타임아웃·재시도) 또는 <code class="inl">write_file</code>(sandbox+확장자 allowlist+크기 제한)</span></li>
+              <li><span class="mk">2</span><span>그 도구를 <b>MCP 서버에 <code class="inl">@mcp.tool()</code>로 노출</b>하고 <code class="inl">mcp_client_demo.py</code>로 호출한 로그 제출</span></li>
+              <li><span class="mk">3</span><span><b>가드레일 검증 3종 캡처</b>: (a) 타임아웃/재시도 (b) 잘못된 입력 <code class="inl">{"error":...}</code> (c) traversal/인젝션 차단</span></li>
+              <li><span class="mk">4</span><span>README에 "MCP 없을 때 <b>N×M</b> 통합 비용과 MCP가 그것을 줄이는 방식"을 3줄 이상</span></li>
+            </ul>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.2rem,0.7vh,0.44rem)">
+              <li><span class="mk">✓</span><span><code class="inl">get_exchange_rate</code>: 타임아웃·재시도·통화 allowlist</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">search_documents_db</code>: 파라미터 바인딩(인젝션 방어)</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">read_file</code>: sandbox 밖(<code class="inl">../</code>) 거부</span></li>
+              <li><span class="mk">✓</span><span>모든 도구가 실패 시 <code class="inl">{"error":...}</code> 반환</span></li>
+              <li><span class="mk">✓</span><span>agent가 실전 도구 여러 개를 스스로 엮어 답(trace)</span></li>
+              <li><span class="mk">✓</span><span>MCP 서버가 도구 3개 노출 / 클라이언트 왕복</span></li>
+              <li><span class="mk">✓</span><span>키·DB 접속정보가 코드에 없고 환경변수로만</span></li>
+            </ul>
+          </div>
+        </div>
+        <p class="note">채점 포인트: <b>예외로 죽지 않고 <code class="inl">{"error":...}</code>로 실패를 반환하는가 / LLM이 만든 인자를 검증하는가 / MCP 서버-클라이언트 왕복이 동작하는가.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 23. 다음 주 예고 -->
+  <section class="slide t-autumn-b" aria-label="다음 주 예고">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Next · Week 11 · Block 3</div>
+        <h2 class="head" style="font-size:var(--title-size)">다음 주 —<br/><span class="accent">Multi-Agent 시스템</span></h2>
+        <p class="hero-line" style="max-width:66ch">하나의 agent를 넘어 <b style="color:var(--ink)">여러 agent가 협업</b>한다. <b style="color:var(--ink)">researcher</b>(자료 조사) + <b style="color:var(--ink)">writer</b>(보고서 작성)가 역할을 나눠, 이번 주에 만든 도구·MCP 리소스를 함께 쓰며 하나의 결과물을 만든다.</p>
+        <p class="note">오케스트레이터/워커 패턴, agent 간 메시지 전달, 상태·메모리 공유, 실패 복구와 <b>휴먼 인 더 루프</b>를 다룬다.</p>
+        <div class="hero-evo" style="margin-top:0.4em">
+          <span class="chip" style="border-color:var(--terracotta-deep)">W10 실전 도구 · 가드레일 · MCP</span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--plum) 25%,var(--paper))">W11 Multi-Agent · 오케스트레이션</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
