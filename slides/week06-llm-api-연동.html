@@ -1,0 +1,1374 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>클라우드 프로그래밍 · Week 06 — LLM API 연동</title>
+
+<style>
+/* ===========================================
+   글꼴 · 팔레트 토큰 (여름 파스텔 → 가을 파스텔)
+   완전 자체 완결형: 외부 폰트/이미지 요청 없음
+   week01~05 덱과 동일한 디자인 시스템 계승 (Block 2 진입)
+   =========================================== */
+:root {
+  /* 시스템 폰트 스택 (한글 폴백 포함) */
+  --font-sans: "Pretendard Variable", "Pretendard", -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  --font-mono: "JetBrains Mono", "D2Coding", ui-monospace, SFMono-Regular,
+    "Cascadia Code", Consolas, "Malgun Gothic", monospace;
+
+  /* 베이스 (크림/아이보리) */
+  --cream: #FFF8F0;
+  --cream-2: #FBEFE2;
+  --paper: #FFFDFA;
+
+  /* 여름 파스텔 */
+  --coral: #F0A08A;
+  --coral-deep: #E07856;
+  --yellow: #F7D98C;
+  --yellow-soft: #FBE9B6;
+  --mint: #A6D9C9;
+  --teal: #7FC3B4;
+
+  /* 가을 파스텔 */
+  --terracotta: #CE8460;
+  --terracotta-deep: #B96A44;
+  --peach: #E8B99A;
+  --sage: #A7B58C;
+  --sage-deep: #8C9E72;
+  --ochre: #D9A566;
+  --plum: #B98BA6;
+  --plum-deep: #9E7290;
+
+  /* 잉크(본문) — 크림 위 충분한 대비 */
+  --ink: #46382C;
+  --ink-soft: #6B5A49;
+  --ink-faint: #97826D;
+
+  /* 강조 (코랄 → 테라코타 진행) */
+  --accent: var(--coral-deep);
+
+  /* 타이포 스케일 (clamp) */
+  --title-size: clamp(1.9rem, 5.6vw, 4.6rem);
+  --h2-size: clamp(1.35rem, 3.6vw, 2.7rem);
+  --h3-size: clamp(1.05rem, 2.3vw, 1.7rem);
+  --body-size: clamp(0.82rem, 1.45vw, 1.12rem);
+  --small-size: clamp(0.68rem, 1.05vw, 0.9rem);
+  --micro-size: clamp(0.6rem, 0.9vw, 0.78rem);
+
+  --slide-padding: clamp(1.4rem, 4.5vw, 4.5rem);
+  --content-gap: clamp(0.6rem, 2vw, 1.9rem);
+  --element-gap: clamp(0.3rem, 1vw, 1rem);
+
+  --radius: clamp(14px, 1.6vw, 24px);
+  --shadow-soft: 0 18px 40px -22px rgba(120, 78, 46, 0.45),
+    0 4px 14px -8px rgba(120, 78, 46, 0.28);
+  --shadow-lift: 0 26px 60px -26px rgba(120, 78, 46, 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===========================================
+   DECK: transform 기반 세로 슬라이드 컨트롤러
+   =========================================== */
+.deck {
+  position: fixed;
+  inset: 0;
+  transform: translateY(calc(var(--i, 0) * -100dvh));
+  transition: transform 0.72s var(--ease);
+  will-change: transform;
+}
+
+.slide {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+}
+
+.slide-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--content-gap);
+  max-height: 100%;
+  overflow: hidden;
+  padding: var(--slide-padding);
+  position: relative;
+  z-index: 2;
+}
+
+/* ===========================================
+   계절 배경 톤: 여름 → 가을로 은은히 전이
+   =========================================== */
+.slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(120% 90% at 12% 0%, var(--wash-a) 0%, transparent 55%),
+    radial-gradient(120% 100% at 100% 100%, var(--wash-b) 0%, transparent 58%),
+    linear-gradient(160deg, var(--cream) 0%, var(--cream-2) 100%);
+}
+/* 상단 얇은 계절 리본 */
+.slide::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--ribbon-a), var(--ribbon-b));
+  opacity: 0.9;
+}
+
+/* 여름 A */
+.t-summer-a  { --wash-a: rgba(166,217,201,0.55); --wash-b: rgba(251,233,182,0.6);  --ribbon-a: var(--mint);   --ribbon-b: var(--yellow); }
+/* 여름 B */
+.t-summer-b  { --wash-a: rgba(247,217,140,0.6);  --wash-b: rgba(240,160,138,0.5);  --ribbon-a: var(--yellow); --ribbon-b: var(--coral); }
+/* 전이 A */
+.t-mid-a     { --wash-a: rgba(240,160,138,0.5);  --wash-b: rgba(232,185,154,0.6);  --ribbon-a: var(--coral);  --ribbon-b: var(--peach); }
+/* 전이 B */
+.t-mid-b     { --wash-a: rgba(232,185,154,0.6);  --wash-b: rgba(217,165,102,0.5);  --ribbon-a: var(--peach);  --ribbon-b: var(--ochre); }
+/* 가을 A */
+.t-autumn-a  { --wash-a: rgba(217,165,102,0.5);  --wash-b: rgba(167,181,140,0.55); --ribbon-a: var(--ochre);  --ribbon-b: var(--sage); }
+/* 가을 B */
+.t-autumn-b  { --wash-a: rgba(206,132,96,0.5);   --wash-b: rgba(185,139,166,0.5);  --ribbon-a: var(--terracotta); --ribbon-b: var(--plum); }
+
+/* 강조색도 계절따라 이동 */
+.t-summer-a, .t-summer-b { --accent: var(--coral-deep); }
+.t-mid-a, .t-mid-b       { --accent: #C97648; }
+.t-autumn-a              { --accent: var(--terracotta-deep); }
+.t-autumn-b              { --accent: var(--plum-deep); }
+
+/* ===========================================
+   장식 모티프 (인라인 SVG, 은은하게)
+   =========================================== */
+.motif {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.motif--sun  { top: clamp(-40px,-3vw,-20px); right: clamp(-30px,4vw,60px); width: clamp(140px, 22vw, 320px); color: var(--yellow); opacity: 0.55; }
+.motif--leaf { bottom: clamp(-50px,-4vw,-30px); right: clamp(-20px,3vw,50px); width: clamp(150px, 24vw, 340px); color: var(--sage); opacity: 0.4; }
+.motif--wave { bottom: 0; left: 0; width: 100%; color: var(--mint); opacity: 0.35; }
+.motif--blob { top: 8%; left: -6%; width: clamp(180px,26vw,380px); color: var(--peach); opacity: 0.35; filter: blur(2px); }
+
+/* ===========================================
+   공통 타이포 & 컴포넌트
+   =========================================== */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--small-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: "";
+  width: clamp(20px, 3vw, 42px);
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+h1.title {
+  font-size: var(--title-size);
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h2.head {
+  font-size: var(--h2-size);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+h2.head .accent { color: var(--accent); }
+.sub {
+  font-size: var(--h3-size);
+  font-weight: 500;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+p.lead { font-size: var(--body-size); color: var(--ink-soft); line-height: 1.55; max-width: 60ch; }
+
+.section-no {
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+/* 카드 */
+.card {
+  background: var(--paper);
+  border: 1px solid rgba(120, 78, 46, 0.1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.85rem, 1.8vw, 1.6rem);
+}
+
+/* 그리드 */
+.grid { display: grid; gap: clamp(0.55rem, 1.4vw, 1.1rem); }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+/* 불릿 */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: clamp(0.45rem, 1.3vh, 1rem); }
+.checklist li {
+  display: flex;
+  gap: 0.75em;
+  align-items: flex-start;
+  font-size: var(--body-size);
+  line-height: 1.45;
+  color: var(--ink);
+}
+.checklist li .mk {
+  flex: none;
+  margin-top: 0.15em;
+  width: clamp(20px, 2.2vw, 27px);
+  height: clamp(20px, 2.2vw, 27px);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 0.82em;
+}
+
+/* 표 */
+.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--small-size); }
+.tbl th, .tbl td {
+  text-align: left;
+  padding: clamp(0.4rem, 0.95vw, 0.85rem) clamp(0.5rem, 1.1vw, 1rem);
+  border-bottom: 1px solid rgba(120, 78, 46, 0.12);
+  vertical-align: top;
+  line-height: 1.4;
+}
+.tbl thead th {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  text-transform: none;
+}
+.tbl tbody tr:last-child td { border-bottom: none; }
+.tbl .em { font-weight: 700; color: var(--ink); }
+.tbl code, code.inl {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, var(--cream));
+  color: var(--terracotta-deep);
+  padding: 0.08em 0.4em;
+  border-radius: 6px;
+}
+
+/* 코드 블록 (다크 웜톤 카드) */
+.code {
+  background: #2E2620;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  overflow: hidden;
+  border: 1px solid rgba(255, 248, 240, 0.08);
+}
+.code__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: clamp(0.5rem, 1vw, 0.8rem) clamp(0.7rem, 1.3vw, 1.1rem);
+  background: rgba(255, 248, 240, 0.05);
+  border-bottom: 1px solid rgba(255, 248, 240, 0.07);
+}
+.code__bar .dot { width: 11px; height: 11px; border-radius: 50%; }
+.dot.r { background: #E8846B; } .dot.y { background: #F2C572; } .dot.g { background: #9DBF83; }
+.code__file { margin-left: 0.5em; font-family: var(--font-mono); font-size: var(--micro-size); color: #C9B6A2; letter-spacing: 0.03em; }
+.code pre {
+  margin: 0;
+  padding: clamp(0.7rem, 1.5vw, 1.3rem) clamp(0.9rem, 1.8vw, 1.5rem);
+  font-family: var(--font-mono);
+  font-size: clamp(0.68rem, 1.15vw, 1rem);
+  line-height: 1.62;
+  color: #F3E9DC;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 코드 블록 조밀 변형 (긴 코드 대응) */
+.code pre.dense { font-size: clamp(0.6rem, 0.98vw, 0.86rem); line-height: 1.5; }
+/* 신택스 토큰 */
+.tok-cm { color: #9A8B7A; font-style: italic; }
+.tok-kw { color: #F0A88C; }
+.tok-fn { color: #F2C572; }
+.tok-st { color: #A9CE9A; }
+.tok-nm { color: #E5B7DA; }
+.tok-op { color: #C9B6A2; }
+.tok-cmd { color: #8FCBBB; }
+.tok-fl { color: #F3E9DC; }
+.tok-pt { color: #E8846B; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--micro-size);
+  font-weight: 700;
+  padding: 0.35em 0.75em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.note {
+  font-size: var(--small-size);
+  color: var(--ink-soft);
+  border-left: 3px solid var(--accent);
+  padding-left: 0.9em;
+  line-height: 1.5;
+}
+
+/* 기대 출력 강조 박스 */
+.callout {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--mint) 40%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 60%, var(--paper)));
+  border: 1px solid rgba(120, 78, 46, 0.14);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* 경고/필수 강조 박스 */
+.warn {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--coral) 32%, var(--paper)), color-mix(in srgb, var(--yellow-soft) 55%, var(--paper)));
+  border: 1px solid color-mix(in srgb, var(--coral-deep) 35%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+  padding: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+/* ===========================================
+   등장 애니메이션 (활성 슬라이드에서 stagger)
+   =========================================== */
+.stagger > * { opacity: 0; transform: translateY(18px); transition: opacity 0.6s var(--ease), transform 0.6s var(--ease); }
+.slide.active .stagger > * { opacity: 1; transform: none; }
+.slide.active .stagger > *:nth-child(1) { transition-delay: 0.08s; }
+.slide.active .stagger > *:nth-child(2) { transition-delay: 0.16s; }
+.slide.active .stagger > *:nth-child(3) { transition-delay: 0.24s; }
+.slide.active .stagger > *:nth-child(4) { transition-delay: 0.32s; }
+.slide.active .stagger > *:nth-child(5) { transition-delay: 0.40s; }
+.slide.active .stagger > *:nth-child(6) { transition-delay: 0.48s; }
+.slide.active .stagger > *:nth-child(7) { transition-delay: 0.56s; }
+.slide.active .stagger > *:nth-child(8) { transition-delay: 0.64s; }
+
+.slide .float-motif { transition: transform 1.1s var(--ease), opacity 1.1s var(--ease); transform: translateY(24px) scale(0.96); opacity: 0; }
+.slide.active .float-motif { transform: none; opacity: var(--mo, 0.5); }
+
+/* ===========================================
+   HUD: 진행 표시 / 페이지 번호 / 브랜드 / 힌트
+   =========================================== */
+.progress {
+  position: fixed; top: 0; left: 0; height: 5px; z-index: 60;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--coral-deep), var(--ochre), var(--plum-deep));
+  transition: width 0.5s var(--ease);
+  box-shadow: 0 0 12px rgba(224,120,86,0.5);
+}
+.hud {
+  position: fixed; z-index: 55;
+  font-size: var(--micro-size);
+  color: var(--ink-faint);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.hud--brand { top: clamp(0.9rem, 2vw, 1.7rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.hud--brand .badge { font-family: var(--font-mono); font-weight: 800; color: var(--accent); }
+.hud--num { bottom: clamp(0.9rem, 2vw, 1.6rem); right: clamp(1.1rem, 3vw, 2.6rem); font-family: var(--font-mono); }
+.hud--num b { color: var(--ink); font-size: 1.15em; }
+.hud--hint { bottom: clamp(0.9rem, 2vw, 1.6rem); left: clamp(1.1rem, 3vw, 2.6rem); display: flex; align-items: center; gap: 0.55em; }
+.kbd {
+  font-family: var(--font-mono);
+  border: 1px solid rgba(120,78,46,0.25);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.1em 0.5em;
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 0.92em;
+}
+.nav-dots {
+  position: fixed; right: clamp(0.7rem, 1.4vw, 1.3rem); top: 50%; transform: translateY(-50%);
+  z-index: 55; display: flex; flex-direction: column; gap: clamp(6px, 0.9vh, 11px);
+}
+.nav-dots button {
+  width: 9px; height: 9px; border-radius: 50%; border: none; cursor: pointer; padding: 0;
+  background: rgba(120,78,46,0.22); transition: all 0.35s var(--ease);
+}
+.nav-dots button:hover { background: rgba(120,78,46,0.5); }
+.nav-dots button.on { background: var(--accent); height: 22px; border-radius: 6px; }
+
+/* 타이틀 슬라이드 전용 */
+.hero-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--small-size);
+  color: var(--terracotta-deep);
+  background: color-mix(in srgb, var(--yellow-soft) 60%, var(--paper));
+  border: 1px solid rgba(120,78,46,0.14);
+  padding: 0.45em 1em;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.hero-line {
+  font-size: var(--h3-size);
+  font-weight: 600;
+  color: var(--ink-soft);
+  line-height: 1.4;
+  max-width: 44ch;
+}
+.hero-evo {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.6em;
+  font-family: var(--font-mono); font-size: var(--small-size); color: var(--ink);
+}
+.hero-evo .chip { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.8em; box-shadow: var(--shadow-soft); }
+.hero-evo .arrow { color: var(--accent); font-weight: 800; }
+
+/* 파이프라인 흐름 (개념 개요) */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5em; font-family: var(--font-mono); font-size: var(--small-size); }
+.flow .st { background: var(--paper); border: 1px solid rgba(120,78,46,0.15); border-radius: 10px; padding: 0.4em 0.75em; box-shadow: var(--shadow-soft); color: var(--ink-soft); }
+.flow .st.now { background: color-mix(in srgb, var(--plum) 24%, var(--paper)); color: var(--ink); font-weight: 800; border-color: var(--plum-deep); }
+.flow .st.fin { background: color-mix(in srgb, var(--sage) 30%, var(--paper)); color: var(--ink); font-weight: 700; }
+.flow .ar { color: var(--accent); font-weight: 800; }
+
+/* 스트리밍 토큰 스트립 */
+.reqstrip { display: flex; flex-wrap: wrap; gap: 5px; }
+.reqstrip span {
+  font-family: var(--font-mono); font-size: var(--micro-size); font-weight: 800;
+  padding: 0.2em 0.5em; border-radius: 6px;
+  background: color-mix(in srgb, var(--plum) 32%, var(--paper)); color: var(--plum-deep);
+  border: 1px solid color-mix(in srgb, var(--plum-deep) 38%, transparent);
+}
+
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(0.8rem, 2vw, 2rem); align-items: center; }
+.stack { display: flex; flex-direction: column; gap: var(--content-gap); }
+
+.step-badge {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-family: var(--font-mono); font-weight: 800; font-size: var(--small-size);
+  color: var(--accent);
+}
+.step-badge .num {
+  display: grid; place-items: center; width: 1.9em; height: 1.9em; border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 18%, var(--paper)); color: var(--accent);
+}
+
+.mini-legend { display:flex; gap:0.9em; flex-wrap:wrap; font-size: var(--micro-size); color: var(--ink-soft); font-weight:600; }
+
+@media (max-width: 780px) {
+  .split, .layer-row, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .nav-dots { display: none; }
+}
+@media (max-height: 720px) {
+  :root { --content-gap: clamp(0.5rem, 1.4vw, 1.1rem); }
+  .motif { opacity: 0.32 !important; }
+}
+@media (max-height: 600px) {
+  .hud--hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck { transition: none; }
+  .stagger > *, .float-motif { transition-duration: 0.001ms !important; opacity: 1 !important; transform: none !important; }
+}
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="hud hud--brand">
+  <span class="badge">CP</span><span>클라우드 프로그래밍 · Week 06</span>
+</div>
+<div class="hud hud--num"><b id="curNo">01</b> / <span id="totNo">22</span></div>
+<div class="hud hud--hint">
+  <span class="kbd">←</span><span class="kbd">→</span><span>또는 스페이스로 이동</span>
+</div>
+<nav class="nav-dots" id="dots" aria-label="슬라이드 이동"></nav>
+
+<main class="deck" id="deck">
+
+  <!-- 1. 타이틀 -->
+  <section class="slide t-autumn-b" aria-label="타이틀">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content stagger">
+      <span class="hero-tag">클라우드프로그래밍 · 12주 과정 · Block 2 시작 · AI 서비스</span>
+      <div class="eyebrow">Week 06 — LLM API 연동</div>
+      <h1 class="title">그릇에 지능을 담는다 —<br/><span style="color:var(--accent)">/chat</span></h1>
+      <p class="hero-line">week01~05에서 만든 것은 "그릇"이었다. 이제 <b style="color:var(--ink)">docpilot</b>에 <b style="color:var(--ink)">진짜 LLM</b>을 연결해, 문서 도우미가 <b style="color:var(--ink)">사람 말로 대답</b>하게 만든다 — OpenAI(기본)/Gemini(대안) 호출 + 스트리밍(SSE) + 시스템 프롬프트.</p>
+      <div class="hero-evo">
+        <span class="chip">W05 운영형 배포 <code class="inl" style="background:none;color:var(--teal)">그릇</code></span>
+        <span class="arrow">→</span>
+        <span class="chip"><code class="inl" style="background:none;color:var(--teal)">/chat</code> · <code class="inl" style="background:none;color:var(--teal)">/chat/stream</code> · system prompt · provider 교체</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. 학습 목표 -->
+  <section class="slide t-autumn-b" aria-label="학습 목표">
+    <svg class="motif motif--blob float-motif" style="--mo:0.35" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M42 -63C56 -54 70 -44 74 -30C78 -16 72 2 65 18C58 34 50 48 37 58C24 68 6 74 -12 76C-30 78 -49 76 -61 65C-73 54 -78 34 -80 15C-82 -4 -81 -22 -72 -36C-63 -50 -46 -60 -30 -67C-14 -74 1 -78 15 -75C29 -72 28 -72 42 -63Z" transform="translate(100 100)"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">01 / 개요</div>
+        <h2 class="head">이번 주가 끝나면 <span class="accent">할 수 있는 것</span></h2>
+        <ul class="checklist" style="max-width:84ch">
+          <li><span class="mk">1</span><span>LLM API의 동작 원리(<b>인증 → 요청 → 응답</b>, 토큰·비용, 스트리밍)를 설명한다.</span></li>
+          <li><span class="mk">2</span><span><code class="inl">system</code> / <code class="inl">user</code> / <code class="inl">assistant</code> 역할과 <code class="inl">temperature</code> 등 핵심 파라미터의 효과를 예로 설명한다.</span></li>
+          <li><span class="mk">3</span><span>API 키를 <b>환경변수</b>로 안전하게 로드한다(하드코딩 금지).</span></li>
+          <li><span class="mk">4</span><span>docpilot에 <code class="inl">/chat</code> 엔드포인트를 추가해 OpenAI를 호출한다.</span></li>
+          <li><span class="mk">5</span><span><code class="inl">StreamingResponse</code>(SSE)로 토큰을 실시간으로 흘려보낸다.</span></li>
+          <li><span class="mk">6</span><span>Gemini / Ollama로 <b>프로바이더를 교체</b>할 수 있는 구조를 만든다.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. 개념 개요 / 이번 주 지도 -->
+  <section class="slide t-autumn-b" aria-label="개념 개요">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 / 이번 주 지도 — Block 2 시작</div>
+        <h2 class="head">그릇은 됐다. 이제 <span class="accent">두뇌</span>를 붙인다</h2>
+        <div class="flow">
+          <span class="st fin">Block 1<br/>(week01~05 그릇)</span><span class="ar">┃</span>
+          <span class="st now">week06 /chat<br/>(LLM 연동)</span><span class="ar">→</span>
+          <span class="st">week07 멀티모달</span><span class="ar">→</span>
+          <span class="st">week08 RAG</span>
+        </div>
+        <div class="grid grid-3" style="max-width:min(96vw,1120px)">
+          <div class="card"><b style="color:var(--accent)">① LLM API</b><p class="lead" style="margin-top:0.25em">인증 → 요청(messages) → 응답(text + usage)</p></div>
+          <div class="card"><b style="color:var(--accent)">② 토큰 · 비용</b><p class="lead" style="margin-top:0.25em">입력·출력 토큰 단가 → 컨텍스트가 곧 돈</p></div>
+          <div class="card"><b style="color:var(--accent)">③ 스트리밍</b><p class="lead" style="margin-top:0.25em">SSE로 토큰을 조각조각 실시간 전송</p></div>
+          <div class="card"><b style="color:var(--accent)">④ 프롬프트</b><p class="lead" style="margin-top:0.25em">system/user/assistant 역할 · temperature</p></div>
+          <div class="card"><b style="color:var(--accent)">⑤ /chat 라우트</b><p class="lead" style="margin-top:0.25em">비스트리밍 → SSE 스트리밍 순으로 확장</p></div>
+          <div class="card"><b style="color:var(--accent)">⑥ 프로바이더 교체</b><p class="lead" style="margin-top:0.25em">환경변수만 바꿔 OpenAI↔Gemini↔Ollama</p></div>
+        </div>
+        <p class="note">3부 구성: <b>1부 환경 준비(설치·키·최초 호출) → 2부 /chat 비스트리밍 → 3부 스트리밍 + 프로바이더 교체</b>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. 개념 ① LLM API란 -->
+  <section class="slide t-autumn-b" aria-label="LLM API란">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ① / LLM API란 무엇인가</div>
+        <h2 class="head">모델을 <span class="accent">HTTP로 부른다</span></h2>
+        <p class="lead" style="max-width:84ch">LLM은 "지금까지의 대화"를 입력받아 "다음에 올 말"을 확률적으로 이어 쓰는 모델이다. 우리는 이 모델을 직접 돌리지 않고 <b>HTTP API</b>로 호출한다.</p>
+        <div class="flow" style="align-self:center">
+          <span class="st">우리 서버<br/>(docpilot)</span><span class="ar">— HTTPS 요청 (messages + 파라미터) →</span>
+          <span class="st now">LLM 제공자</span>
+        </div>
+        <div class="flow" style="align-self:center">
+          <span class="st">우리 서버</span><span class="ar">← 응답 (생성 텍스트 + usage 토큰) —</span>
+          <span class="st now">LLM 제공자</span>
+        </div>
+        <div class="grid grid-3" style="max-width:min(96vw,1120px)">
+          <div class="card"><span class="pill">인증</span><p class="lead" style="margin-top:0.4em"><code class="inl">Authorization: Bearer &lt;KEY&gt;</code>(SDK가 대신 처리). 키는 곧 "돈" — 코드·깃에 절대 금지.</p></div>
+          <div class="card"><span class="pill">요청</span><p class="lead" style="margin-top:0.4em">모델 이름 + <code class="inl">messages</code> 배열(역할별 메시지) + 파라미터(<code class="inl">temperature</code> 등).</p></div>
+          <div class="card"><span class="pill">응답</span><p class="lead" style="margin-top:0.4em">생성 텍스트 + <code class="inl">usage</code>(입력/출력 토큰 수).</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. 개념 ② 토큰과 비용 + ③ 스트리밍 -->
+  <section class="slide t-autumn-b" aria-label="토큰과 비용 스트리밍">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">개념 ②③ / 토큰·비용 · 스트리밍</div>
+        <h2 class="head">비용은 <span class="accent">토큰</span>, 체감은 <span class="accent">스트리밍</span></h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--ochre) 20%,var(--paper)),var(--paper))">
+            <b style="color:var(--accent)">② 토큰과 비용</b>
+            <p class="lead" style="margin-top:0.35em"><b>토큰</b>: 모델이 텍스트를 자르는 단위. 영어 1토큰 ≈ 4글자, 한글은 1글자 ≈ 1~2토큰.</p>
+            <p class="lead" style="margin-top:0.35em"><b>비용</b> = (입력 토큰 × 입력 단가) + (출력 토큰 × 출력 단가). 소형 모델이 훨씬 저렴.</p>
+            <p class="note" style="margin-top:0.5em">컨텍스트(입력)를 길게 넣을수록 매 호출 비용↑ → <b>week08 RAG</b>에서 "필요한 조각만" 넣는 이유.</p>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--plum) 20%,var(--paper)),var(--paper))">
+            <b style="color:var(--accent)">③ 스트리밍(streaming)</b>
+            <p class="lead" style="margin-top:0.35em">기본 호출은 <b>완성된 답 전체</b>를 한 번에 받는다 → 답이 길면 몇 초간 빈 화면.</p>
+            <p class="lead" style="margin-top:0.35em">스트리밍은 토큰을 <b>조각조각</b> 내려준다(ChatGPT 타이핑 효과). 흔히 <b>SSE</b>: <code class="inl">text/event-stream</code>으로 <code class="inl">data: ...</code> 라인을 계속 흘린다.</p>
+            <div class="reqstrip" style="margin-top:0.5em">
+              <span>data: 클</span><span>data: 라</span><span>data: 우드</span><span>data: …</span><span>done</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. 개념 ④ 프롬프트 엔지니어링 -->
+  <section class="slide t-autumn-b" aria-label="프롬프트 엔지니어링">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">개념 ④ / 프롬프트 엔지니어링 기초</div>
+        <h2 class="head"><code class="inl" style="font-size:0.82em">messages</code>는 <span class="accent">역할을 가진 배열</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="card" style="align-self:stretch;width:100%">
+            <table class="tbl">
+              <thead><tr><th style="width:24%">role</th><th>의미 · 예</th></tr></thead>
+              <tbody>
+                <tr><td class="em"><code>system</code></td><td>모델의 정체성·규칙·톤. 대화 맨 앞 1개. <br/>"너는 docpilot, 모르면 모른다고 답한다."</td></tr>
+                <tr><td class="em"><code>user</code></td><td>사용자의 실제 입력. "배포 방법 알려줘"</td></tr>
+                <tr><td class="em"><code>assistant</code></td><td>모델의 이전 답변(히스토리를 이어줄 때 넣음).</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card" style="align-self:stretch;width:100%">
+            <table class="tbl">
+              <thead><tr><th style="width:32%">파라미터</th><th>역할 · 감 잡기</th></tr></thead>
+              <tbody>
+                <tr><td class="em"><code>temperature</code></td><td>무작위성/창의성. 0=결정적. <br/>사실 0~0.3, 브레인스토밍 0.7~1.0</td></tr>
+                <tr><td class="em"><code>max_tokens</code></td><td>출력 길이 상한. 비용·응답시간 제어에 필수</td></tr>
+                <tr><td class="em"><code>top_p</code></td><td>누적확률 샘플링(temperature 대안). 보통 temperature만 조절</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="note">핵심 원칙: <b>지시는 구체적으로, 형식은 명시적으로, 예시를 곁들이면 더 안정적.</b></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. 사전 준비 — 0단계 마이그레이션 (필수) -->
+  <section class="slide t-autumn-b" aria-label="사전 준비 0단계 프로젝트 구조 전환">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">사전 준비 · 0단계 / 이번 주 최초 1회만 · 필수</div>
+        <h2 class="head">루트 <code class="inl" style="font-size:0.8em">main.py/db.py</code> → <span class="accent"><code class="inl" style="font-size:0.8em">app/</code> 패키지</span> 전환</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 0단계 구조 전환</span></div>
+<pre class="dense"><span class="tok-cmd">cd</span> <span class="tok-fl">~/projects/docpilot</span>
+<span class="tok-cmd">mkdir</span> <span class="tok-fl">-p app</span> &amp;&amp; <span class="tok-cmd">touch</span> <span class="tok-fl">app/__init__.py</span>
+<span class="tok-cmd">git</span> mv <span class="tok-fl">main.py app/main.py</span>   <span class="tok-cm"># 루트 → app/</span>
+<span class="tok-cmd">git</span> mv <span class="tok-fl">db.py app/db.py</span>
+<span class="tok-cm"># app/main.py의 `from db import` 를 수정</span>
+<span class="tok-cmd">sed</span> <span class="tok-fl">-i 's/^from db import/from app.db import/'</span> \
+  <span class="tok-fl">app/main.py</span></pre>
+          </div>
+          <div class="stack">
+            <div class="warn" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--coral-deep);font-size:var(--small-size)">⚠️ 이 전환을 안 하면</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">week06부터 파일이 빠르게 는다(설정·LLM·RAG·에이전트). 전환하지 않으면 <b>이후 모든 주차의 <code class="inl">from app.xxx import ...</code>가 실패</b>한다.</p>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">uvicorn app.main:app --reload</code>로 서버가 뜨고 <code class="inl">curl localhost:8000/health</code>가 <code class="inl">{"status":"ok"}</code>를 반환하면 완료. 이제 실행 명령은 항상 <code class="inl">uvicorn app.main:app</code>.</p>
+            </div>
+          </div>
+        </div>
+        <p class="note">Dockerfile은 <code class="inl">COPY main.py .</code>/<code class="inl">COPY db.py .</code> 두 줄을 <code class="inl">COPY app ./app</code> 한 줄로. CI 트리거 <code class="inl">paths</code>도 <code class="inl">app/**</code>로 (최종 정리는 week12).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. 사전 준비 — 키 발급 -->
+  <section class="slide t-autumn-b" aria-label="사전 준비 키 발급">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">사전 준비 / 계정 · 키 · 런타임</div>
+        <h2 class="head">최소 하나의 <span class="accent">LLM 접근 경로</span></h2>
+        <div class="grid grid-3" style="max-width:min(96vw,1140px)">
+          <div class="card">
+            <span class="pill">OpenAI · 기본</span>
+            <p class="lead" style="margin-top:0.4em"><b>platform.openai.com</b> → API keys → Create. 가입 시 소액 크레딧 또는 결제수단 등록 후 소액($5)이면 이 실습에 충분.</p>
+          </div>
+          <div class="card">
+            <span class="pill">Gemini · 선택</span>
+            <p class="lead" style="margin-top:0.4em"><b>aistudio.google.com</b> → Get API key. <b>무료 티어</b>가 있어 크레딧 부담 없이 대안 프로바이더 실습.</p>
+          </div>
+          <div class="card">
+            <span class="pill">Ollama · 완전 무료</span>
+            <p class="lead" style="margin-top:0.4em"><b>ollama.com</b>. 로컬에서 소형 모델 구동. 키·비용·인터넷 없이 개발/테스트 가능.</p>
+          </div>
+        </div>
+        <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+          <p class="lead" style="font-size:var(--small-size)">전제: Python 3.12, 가상환경(venv 또는 uv), 그리고 week05까지의 docpilot 코드베이스. 아직 없다면 week01~05를 먼저 완료할 것. 배포 환경에서는 키를 <b>week05의 K8s Secret</b>으로 주입한다 — 설정 외부화 습관이 그대로 이어진다.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. 실습 로드맵 -->
+  <section class="slide t-autumn-b" aria-label="실습 로드맵">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.4" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">실습 / 단계별 따라하기</div>
+        <h2 class="head">3부 · <span class="accent">docpilot에 지능 붙이기</span></h2>
+        <div class="grid grid-3" style="max-width:min(96vw,1140px)">
+          <div class="card"><span class="step-badge"><span class="num">1</span>1부 · 환경 준비</span><p class="lead" style="margin-top:0.5em">패키지 설치 → <code class="inl">.env</code>+<code class="inl">config.py</code> → 최초 호출 스크립트</p></div>
+          <div class="card"><span class="step-badge"><span class="num">2</span>2부 · /chat 붙이기</span><p class="lead" style="margin-top:0.5em"><code class="inl">app/llm.py</code> 추상화 → <code class="inl">/chat</code>(비스트리밍) 라우트</p></div>
+          <div class="card"><span class="step-badge"><span class="num">3</span>3부 · 스트리밍·교체</span><p class="lead" style="margin-top:0.5em"><code class="inl">/chat/stream</code>(SSE) → 브라우저 → Gemini/Ollama</p></div>
+        </div>
+        <p class="note">작업 디렉터리는 docpilot 프로젝트 루트. 0단계 전환 완료 후 실행 명령은 항상 <code class="inl">uvicorn app.main:app</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. 1부 1단계 패키지 설치 -->
+  <section class="slide t-autumn-b" aria-label="1부 1단계 패키지 설치">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 1단계 · 실행 확인</div>
+        <h2 class="head">패키지 설치 — <span class="accent">SDK + 설정 로더</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 가상환경 활성화 상태에서</span></div>
+<pre class="dense"><span class="tok-cmd">pip</span> install <span class="tok-st">"openai&gt;=1.40"</span> \
+  <span class="tok-st">"google-genai&gt;=1.0"</span> \
+  <span class="tok-st">"pydantic-settings&gt;=2.0"</span> \
+  <span class="tok-st">"python-dotenv&gt;=1.0"</span> \
+  <span class="tok-st">"sse-starlette&gt;=2.0"</span>
+
+<span class="tok-cm"># import 동작 확인</span>
+<span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"import openai, google.genai; print('sdk ok')"</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">requirements.txt — 아래 추가</span></div>
+<pre class="dense"><span class="tok-fl">openai&gt;=1.40</span>
+<span class="tok-fl">google-genai&gt;=1.0</span>
+<span class="tok-fl">pydantic-settings&gt;=2.0</span>
+<span class="tok-fl">python-dotenv&gt;=1.0</span>
+<span class="tok-fl">sse-starlette&gt;=2.0</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">설치 로그 마지막 <code class="inl">Successfully installed ... openai-1.xx.x ...</code>, 그리고 <code class="inl">sdk ok</code> 출력. <code class="inl">requirements.txt</code> 반영은 컨테이너 재빌드 시 필요.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. 1부 2단계 .env + config.py -->
+  <section class="slide t-autumn-b" aria-label="1부 2단계 환경변수와 config">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 2단계</div>
+        <h2 class="head">키는 <span class="accent">환경</span>에 — <code class="inl" style="font-size:0.8em">.env</code> + <code class="inl" style="font-size:0.8em">config.py</code></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">.env  ← git 커밋 금지</span></div>
+<pre class="dense"><span class="tok-kw">OPENAI_API_KEY</span>=<span class="tok-st">sk-...본인_키...</span>
+<span class="tok-kw">OPENAI_MODEL</span>=<span class="tok-st">gpt-4o-mini</span>
+
+<span class="tok-cm"># (선택) Gemini</span>
+<span class="tok-kw">GEMINI_API_KEY</span>=<span class="tok-st">...본인_키...</span>
+<span class="tok-kw">GEMINI_MODEL</span>=<span class="tok-st">gemini-2.0-flash</span>
+
+<span class="tok-cm"># provider: openai | gemini | ollama</span>
+<span class="tok-kw">LLM_PROVIDER</span>=<span class="tok-st">openai</span>
+
+<span class="tok-cm"># (선택) Ollama</span>
+<span class="tok-kw">OLLAMA_HOST</span>=<span class="tok-st">http://localhost:11434</span>
+<span class="tok-kw">OLLAMA_MODEL</span>=<span class="tok-st">llama3.2</span></pre>
+          </div>
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/config.py — pydantic-settings</span></div>
+<pre class="dense"><span class="tok-kw">from</span> functools <span class="tok-kw">import</span> lru_cache
+<span class="tok-kw">from</span> pydantic_settings <span class="tok-kw">import</span> BaseSettings, \
+    SettingsConfigDict
+
+
+<span class="tok-kw">class</span> <span class="tok-fn">Settings</span>(BaseSettings):
+    llm_provider: <span class="tok-fl">str</span> = <span class="tok-st">"openai"</span>
+    openai_api_key: <span class="tok-fl">str</span> | <span class="tok-kw">None</span> = <span class="tok-kw">None</span>
+    openai_model: <span class="tok-fl">str</span> = <span class="tok-st">"gpt-4o-mini"</span>
+    gemini_api_key: <span class="tok-fl">str</span> | <span class="tok-kw">None</span> = <span class="tok-kw">None</span>
+    gemini_model: <span class="tok-fl">str</span> = <span class="tok-st">"gemini-2.0-flash"</span>
+    ollama_host: <span class="tok-fl">str</span> = <span class="tok-st">"http://localhost:11434"</span>
+    ollama_model: <span class="tok-fl">str</span> = <span class="tok-st">"llama3.2"</span>
+
+    model_config = SettingsConfigDict(
+        env_file=<span class="tok-st">".env"</span>, extra=<span class="tok-st">"ignore"</span>)
+
+
+<span class="tok-kw">@lru_cache</span>
+<span class="tok-kw">def</span> <span class="tok-fn">get_settings</span>() -&gt; Settings:
+    <span class="tok-kw">return</span> Settings()</pre>
+          </div>
+        </div>
+        <p class="note"><code class="inl">grep -qxF ".env" .gitignore || echo ".env" &gt;&gt; .gitignore</code>로 <code class="inl">.env</code>를 무시목록에. <b>확인</b>: <code class="inl">python -c "from app.config import get_settings; s=get_settings(); print(s.llm_provider, bool(s.openai_api_key))"</code> → <code class="inl">openai True</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. 1부 3단계 최초 호출 스크립트 -->
+  <section class="slide t-autumn-b" aria-label="1부 3단계 최초 호출 스크립트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">1부 · 3단계 · 실행 확인</div>
+        <h2 class="head">최초 호출 — <span class="accent">SDK로 손맛 보기</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">scratch_openai.py — 임시 스크립트</span></div>
+<pre class="dense"><span class="tok-kw">from</span> openai <span class="tok-kw">import</span> OpenAI
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+
+settings = get_settings()
+client = OpenAI(api_key=settings.openai_api_key)
+
+resp = client.chat.completions.create(
+    model=settings.openai_model,
+    messages=[
+        {<span class="tok-st">"role"</span>: <span class="tok-st">"system"</span>,
+         <span class="tok-st">"content"</span>: <span class="tok-st">"You are docpilot. Answer in Korean."</span>},
+        {<span class="tok-st">"role"</span>: <span class="tok-st">"user"</span>,
+         <span class="tok-st">"content"</span>: <span class="tok-st">"LLM API가 뭔지 한 문장으로."</span>},
+    ],
+    temperature=<span class="tok-nm">0.3</span>,
+    max_tokens=<span class="tok-nm">200</span>,
+)
+
+<span class="tok-fn">print</span>(<span class="tok-st">"답변:"</span>, resp.choices[<span class="tok-nm">0</span>].message.content)
+<span class="tok-fn">print</span>(<span class="tok-st">"토큰 usage:"</span>, resp.usage)</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 실행</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> <span class="tok-fl">scratch_openai.py</span></pre>
+            </div>
+            <div class="callout">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+<pre style="margin-top:0.35em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.55;white-space:pre-wrap">답변: LLM API는 ... (한국어 한 문장)
+토큰 usage: CompletionUsage(
+  prompt_tokens=..., completion_tokens=...,
+  total_tokens=...)</pre>
+              <p class="lead" style="margin-top:0.3em;font-size:var(--micro-size)">인증·요청·응답·토큰을 눈으로 확인한 것. 에러 시 트러블슈팅의 401/429 먼저.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. 2부 4단계 app/llm.py (1) 추상화 -->
+  <section class="slide t-autumn-b" aria-label="2부 4단계 llm 모듈 추상화">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 4단계</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">app/llm.py</code> — <span class="accent">프로바이더 추상화</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/llm.py — messages 빌더 + OpenAI</span></div>
+<pre class="dense"><span class="tok-kw">from</span> collections.abc <span class="tok-kw">import</span> AsyncIterator
+<span class="tok-kw">from</span> openai <span class="tok-kw">import</span> AsyncOpenAI
+<span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> Settings, get_settings
+
+Messages = <span class="tok-fl">list</span>[<span class="tok-fl">dict</span>[<span class="tok-fl">str</span>, <span class="tok-fl">str</span>]]
+DEFAULT_SYSTEM_PROMPT = (
+    <span class="tok-st">"You are docpilot, a helpful document "</span>
+    <span class="tok-st">"assistant. Be concise. Answer in Korean."</span>)
+
+
+<span class="tok-kw">def</span> <span class="tok-fn">build_messages</span>(user_text, system=<span class="tok-kw">None</span>,
+                   history=<span class="tok-kw">None</span>) -&gt; Messages:
+    <span class="tok-cm"># system → (history) → user 순서</span>
+    msgs = [{<span class="tok-st">"role"</span>: <span class="tok-st">"system"</span>,
+             <span class="tok-st">"content"</span>: system <span class="tok-kw">or</span> DEFAULT_SYSTEM_PROMPT}]
+    <span class="tok-kw">if</span> history: msgs.extend(history)
+    msgs.append({<span class="tok-st">"role"</span>: <span class="tok-st">"user"</span>, <span class="tok-st">"content"</span>: user_text})
+    <span class="tok-kw">return</span> msgs
+
+
+<span class="tok-kw">async def</span> <span class="tok-fn">_openai_stream</span>(msgs, s: Settings, temp):
+    client = AsyncOpenAI(api_key=s.openai_api_key)
+    stream = <span class="tok-kw">await</span> client.chat.completions.create(
+        model=s.openai_model, messages=msgs,
+        temperature=temp, stream=<span class="tok-kw">True</span>)
+    <span class="tok-kw">async for</span> chunk <span class="tok-kw">in</span> stream:
+        delta = chunk.choices[<span class="tok-nm">0</span>].delta.content
+        <span class="tok-kw">if</span> delta: <span class="tok-kw">yield</span> delta</pre>
+          </div>
+          <div class="stack">
+            <div class="card">
+              <b style="color:var(--accent)">얇은 추상화 계층</b>
+              <p class="lead" style="margin-top:0.35em">OpenAI/Gemini/Ollama를 하나의 인터페이스(<code class="inl">complete</code>, <code class="inl">stream</code>)로 감싼다. <code class="inl">/chat</code>은 이 모듈만 알면 되고 <b>프로바이더 세부는 몰라도 된다.</b></p>
+            </div>
+            <div class="note"><code class="inl">_gemini_*</code>는 <code class="inl">google.genai</code> Client로 <code class="inl">system_instruction</code>+<code class="inl">contents</code>로 변환(assistant→model), <code class="inl">_ollama_*</code>는 <code class="inl">httpx</code>로 <code class="inl">/api/chat</code> 호출 — 같은 시그니처로 구현.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. 2부 4단계 (2) 디스패치 -->
+  <section class="slide t-autumn-b" aria-label="2부 4단계 프로바이더 디스패치">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 4단계 · 실행 확인</div>
+        <h2 class="head">공개 API — <span class="accent">프로바이더 디스패치</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/llm.py — complete / stream</span></div>
+<pre class="dense"><span class="tok-kw">async def</span> <span class="tok-fn">complete</span>(messages, temperature=<span class="tok-nm">0.3</span>) -&gt; <span class="tok-fl">str</span>:
+    s = get_settings()
+    <span class="tok-kw">if</span> s.llm_provider == <span class="tok-st">"openai"</span>:
+        <span class="tok-kw">return await</span> _openai_complete(messages, s, temperature)
+    <span class="tok-kw">if</span> s.llm_provider == <span class="tok-st">"gemini"</span>:
+        <span class="tok-kw">return await</span> _gemini_complete(messages, s, temperature)
+    <span class="tok-kw">if</span> s.llm_provider == <span class="tok-st">"ollama"</span>:
+        <span class="tok-kw">return await</span> _ollama_complete(messages, s, temperature)
+    <span class="tok-kw">raise</span> <span class="tok-fn">ValueError</span>(<span class="tok-st">f"Unknown provider: {s.llm_provider}"</span>)
+
+
+<span class="tok-kw">async def</span> <span class="tok-fn">stream</span>(messages, temperature=<span class="tok-nm">0.3</span>):
+    s = get_settings()
+    <span class="tok-kw">if</span> s.llm_provider == <span class="tok-st">"openai"</span>:
+        gen = _openai_stream(messages, s, temperature)
+    <span class="tok-kw">elif</span> s.llm_provider == <span class="tok-st">"gemini"</span>:
+        gen = _gemini_stream(messages, s, temperature)
+    <span class="tok-kw">elif</span> s.llm_provider == <span class="tok-st">"ollama"</span>:
+        gen = _ollama_stream(messages, s, temperature)
+    <span class="tok-kw">else</span>:
+        <span class="tok-kw">raise</span> <span class="tok-fn">ValueError</span>(<span class="tok-st">f"Unknown provider: {s.llm_provider}"</span>)
+    <span class="tok-kw">async for</span> piece <span class="tok-kw">in</span> gen:
+        <span class="tok-kw">yield</span> piece</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — import 확인</span></div>
+<pre class="dense"><span class="tok-cmd">python</span> <span class="tok-fl">-c</span> <span class="tok-st">"import app.llm; print('llm module ok')"</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">llm module ok</code> — import 에러가 없으면 통과. <code class="inl">complete</code>는 한 번에 답, <code class="inl">stream</code>은 조각을 <code class="inl">yield</code>하는 비동기 제너레이터.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. 2부 5단계 /chat 비스트리밍 -->
+  <section class="slide t-autumn-b" aria-label="2부 5단계 chat 비스트리밍 라우트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">2부 · 5단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/chat</code> 라우트 — <span class="accent">한 번에 답 받기</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 기존 app = FastAPI(...) 아래</span></div>
+<pre class="dense"><span class="tok-kw">from</span> pydantic <span class="tok-kw">import</span> BaseModel, Field
+<span class="tok-kw">from</span> app <span class="tok-kw">import</span> llm
+
+
+<span class="tok-kw">class</span> <span class="tok-fn">ChatRequest</span>(BaseModel):
+    message: <span class="tok-fl">str</span> = Field(..., min_length=<span class="tok-nm">1</span>,
+                         max_length=<span class="tok-nm">4000</span>)
+    system: <span class="tok-fl">str</span> | <span class="tok-kw">None</span> = <span class="tok-kw">None</span>
+    temperature: <span class="tok-fl">float</span> = Field(<span class="tok-nm">0.3</span>, ge=<span class="tok-nm">0.0</span>, le=<span class="tok-nm">2.0</span>)
+
+
+<span class="tok-kw">class</span> <span class="tok-fn">ChatResponse</span>(BaseModel):
+    reply: <span class="tok-fl">str</span>
+    provider: <span class="tok-fl">str</span>
+
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/chat"</span>, response_model=ChatResponse)
+<span class="tok-kw">async def</span> <span class="tok-fn">chat</span>(req: ChatRequest) -&gt; ChatResponse:
+    <span class="tok-kw">from</span> app.config <span class="tok-kw">import</span> get_settings
+    messages = llm.build_messages(req.message,
+                                  system=req.system)
+    reply = <span class="tok-kw">await</span> llm.complete(messages,
+                              temperature=req.temperature)
+    <span class="tok-kw">return</span> ChatResponse(reply=reply,
+        provider=get_settings().llm_provider)</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 서버 켜고 호출</span></div>
+<pre class="dense"><span class="tok-cmd">uvicorn</span> <span class="tok-fl">app.main:app --reload</span>
+<span class="tok-cm"># 다른 터미널에서</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">-s -X POST localhost:8000/chat</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"message":"두 문장으로 설명","temperature":0.2}'</span> \
+  | <span class="tok-cmd">python</span> <span class="tok-fl">-m json.tool</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+<pre style="margin-top:0.35em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.55;white-space:pre-wrap">{ "reply": "docpilot은 ...", "provider": "openai" }</pre>
+              <p class="lead" style="margin-top:0.3em;font-size:var(--micro-size)"><code class="inl">/docs</code>(Swagger UI)의 "Try it out"으로도 같은 응답. 입력 검증은 Pydantic이 경계에서 담당.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. 3부 6단계 /chat/stream SSE -->
+  <section class="slide t-autumn-b" aria-label="3부 6단계 스트리밍 SSE 엔드포인트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 6단계 · 실행 확인</div>
+        <h2 class="head"><code class="inl" style="font-size:0.8em">/chat/stream</code> — <span class="accent">SSE로 토큰 흘리기</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 추가</span></div>
+<pre class="dense"><span class="tok-kw">from</span> fastapi.responses <span class="tok-kw">import</span> StreamingResponse
+
+
+<span class="tok-kw">@app.post</span>(<span class="tok-st">"/chat/stream"</span>)
+<span class="tok-kw">async def</span> <span class="tok-fn">chat_stream</span>(req: ChatRequest):
+    messages = llm.build_messages(req.message,
+                                  system=req.system)
+
+    <span class="tok-kw">async def</span> <span class="tok-fn">event_generator</span>():
+        <span class="tok-kw">try</span>:
+            <span class="tok-kw">async for</span> piece <span class="tok-kw">in</span> llm.stream(
+                    messages, temperature=req.temperature):
+                <span class="tok-cm"># SSE 프레임: 'data: &lt;내용&gt;\n\n'</span>
+                <span class="tok-kw">yield</span> <span class="tok-st">f"data: {piece}\n\n"</span>
+        <span class="tok-kw">except</span> Exception <span class="tok-kw">as</span> exc:
+            <span class="tok-kw">yield</span> <span class="tok-st">f"event: error\ndata: {exc}\n\n"</span>
+        <span class="tok-kw">finally</span>:
+            <span class="tok-kw">yield</span> <span class="tok-st">"event: done\ndata: [DONE]\n\n"</span>
+
+    <span class="tok-kw">return</span> StreamingResponse(
+        event_generator(),
+        media_type=<span class="tok-st">"text/event-stream"</span>,
+        headers={<span class="tok-st">"Cache-Control"</span>: <span class="tok-st">"no-cache"</span>,
+                 <span class="tok-st">"X-Accel-Buffering"</span>: <span class="tok-st">"no"</span>})</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 버퍼링 없이(-N) 확인</span></div>
+<pre class="dense"><span class="tok-cmd">curl</span> <span class="tok-fl">-N -X POST localhost:8000/chat/stream</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"message":"핵심 개념 3가지"}'</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 — 조각이 연달아, 끝에 done</b>
+              <div class="reqstrip" style="margin-top:0.5em">
+                <span>data: 클</span><span>data: 라</span><span>data: 우드</span><span>data: …</span><span>[DONE]</span>
+              </div>
+              <p class="lead" style="margin-top:0.35em;font-size:var(--micro-size)">완성본을 한 번에 받지 않고 <b>흘러 내려오면</b> 성공. 프로덕션은 조각을 <code class="inl">json.dumps</code>로 감싸거나 <code class="inl">sse-starlette</code>의 <code class="inl">EventSourceResponse</code> 권장(과제).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. 3부 7단계 브라우저 스트리밍 (선택) -->
+  <section class="slide t-autumn-b" aria-label="3부 7단계 브라우저 스트리밍">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 7단계 · 선택(프론트 확인)</div>
+        <h2 class="head">브라우저에서 <span class="accent">타이핑되듯</span> 받기</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">static/chat.html — fetch 스트림 읽기</span></div>
+<pre class="dense"><span class="tok-kw">async function</span> <span class="tok-fn">ask</span>() {
+  <span class="tok-kw">const</span> out = document.getElementById(<span class="tok-st">"out"</span>);
+  out.textContent = <span class="tok-st">""</span>;
+  <span class="tok-kw">const</span> res = <span class="tok-kw">await</span> fetch(<span class="tok-st">"/chat/stream"</span>, {
+    method: <span class="tok-st">"POST"</span>,
+    headers: {<span class="tok-st">"Content-Type"</span>: <span class="tok-st">"application/json"</span>},
+    body: JSON.stringify({message: q.value}),
+  });
+  <span class="tok-kw">const</span> reader = res.body.getReader();
+  <span class="tok-kw">const</span> decoder = <span class="tok-kw">new</span> TextDecoder();
+  <span class="tok-kw">while</span> (<span class="tok-kw">true</span>) {
+    <span class="tok-kw">const</span> {value, done} = <span class="tok-kw">await</span> reader.read();
+    <span class="tok-kw">if</span> (done) <span class="tok-kw">break</span>;
+    decoder.decode(value).split(<span class="tok-st">"\n"</span>).forEach((line) =&gt; {
+      <span class="tok-kw">if</span> (line.startsWith(<span class="tok-st">"data: "</span>)) {
+        <span class="tok-kw">const</span> t = line.slice(<span class="tok-nm">6</span>);
+        <span class="tok-kw">if</span> (t !== <span class="tok-st">"[DONE]"</span>) out.textContent += t;
+      }
+    });
+  }
+}</pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">app/main.py — 정적 파일 마운트</span></div>
+<pre class="dense"><span class="tok-kw">from</span> fastapi.staticfiles <span class="tok-kw">import</span> StaticFiles
+app.mount(<span class="tok-st">"/static"</span>,
+    StaticFiles(directory=<span class="tok-st">"static"</span>), name=<span class="tok-st">"static"</span>)</pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">확인</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)"><code class="inl">localhost:8000/static/chat.html</code>에서 "보내기"를 누르면 답변이 <b>타이핑되듯</b> 그려진다. <code class="inl">data:</code> 라인만 추려 붙이는 최소 SSE 소비 예제.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. 3부 8단계 Gemini 교체 -->
+  <section class="slide t-autumn-b" aria-label="3부 8단계 Gemini 프로바이더 교체">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 8단계 · 실행 확인</div>
+        <h2 class="head">프로바이더 교체 — <span class="accent">환경변수만</span> 바꾼다</h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">.env — Gemini로 전환</span></div>
+<pre class="dense"><span class="tok-kw">LLM_PROVIDER</span>=<span class="tok-st">gemini</span>
+<span class="tok-kw">GEMINI_API_KEY</span>=<span class="tok-st">...본인_키...</span>
+<span class="tok-kw">GEMINI_MODEL</span>=<span class="tok-st">gemini-2.0-flash</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 서버 재시작 후 동일 호출</span></div>
+<pre class="dense"><span class="tok-cmd">curl</span> <span class="tok-fl">-s -X POST localhost:8000/chat</span> \
+  <span class="tok-fl">-H "Content-Type: application/json"</span> \
+  <span class="tok-fl">-d '{"message":"너 지금 어떤 모델이야?"}'</span> \
+  | <span class="tok-cmd">python</span> <span class="tok-fl">-m json.tool</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대 출력</b>
+<pre style="margin-top:0.35em;font-family:var(--font-mono);font-size:var(--micro-size);color:var(--ink);line-height:1.55;white-space:pre-wrap">{ "reply": "...", "provider": "gemini" }</pre>
+              <p class="lead" style="margin-top:0.3em;font-size:var(--micro-size)">응답 JSON의 <code class="inl">"provider": "gemini"</code>. <code class="inl">/chat</code>, <code class="inl">/chat/stream</code> 둘 다 <b>코드 변경 없이</b> 동작 — 추상화의 이점.</p>
+            </div>
+          </div>
+        </div>
+        <p class="note">Gemini는 OpenAI 스타일 <code class="inl">messages</code>를 <code class="inl">system_instruction</code>+<code class="inl">contents</code>로 변환하고 <code class="inl">assistant</code> 역할을 <code class="inl">model</code>로 매핑한다 — 이 변환은 <code class="inl">app/llm.py</code>가 이미 흡수한다.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. 3부 9단계 Ollama -->
+  <section class="slide t-autumn-b" aria-label="3부 9단계 Ollama 로컬 무료">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--element-gap)">
+        <div class="section-no">3부 · 9단계 · 실행 확인</div>
+        <h2 class="head">완전 무료 대안 — <span class="accent">Ollama(로컬)</span></h2>
+        <div class="split" style="align-items:stretch;gap:clamp(0.7rem,1.6vw,1.4rem)">
+          <div class="code" style="align-self:stretch">
+            <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">bash — 설치 · 모델 · 확인</span></div>
+<pre class="dense"><span class="tok-cm"># 설치 (또는 ollama.com에서 OS별)</span>
+<span class="tok-cmd">curl</span> <span class="tok-fl">-fsSL https://ollama.com/install.sh</span> | <span class="tok-cmd">sh</span>
+<span class="tok-cm"># 소형 모델 받기 (약 2GB)</span>
+<span class="tok-cmd">ollama</span> pull <span class="tok-fl">llama3.2</span>
+<span class="tok-cm"># 데몬 자동 실행. 수동 필요 시: ollama serve</span>
+<span class="tok-cmd">ollama</span> run <span class="tok-fl">llama3.2</span> <span class="tok-st">"say hello in korean"</span></pre>
+          </div>
+          <div class="stack">
+            <div class="code">
+              <div class="code__bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code__file">.env — Ollama로 전환</span></div>
+<pre class="dense"><span class="tok-kw">LLM_PROVIDER</span>=<span class="tok-st">ollama</span>
+<span class="tok-kw">OLLAMA_HOST</span>=<span class="tok-st">http://localhost:11434</span>
+<span class="tok-kw">OLLAMA_MODEL</span>=<span class="tok-st">llama3.2</span></pre>
+            </div>
+            <div class="callout" style="padding:clamp(0.6rem,1.3vw,1.1rem)">
+              <b style="color:var(--accent);font-size:var(--small-size)">기대</b>
+              <p class="lead" style="margin-top:0.25em;font-size:var(--small-size)">서버 재시작 후 <code class="inl">/chat/stream</code> 호출 시 (첫 호출은 모델 로딩으로 몇 초 지연) 로컬 모델이 <b>인터넷·키 없이</b> 스트리밍으로 답한다.</p>
+            </div>
+          </div>
+        </div>
+        <p class="note">Docker로 docpilot을 돌리면 컨테이너 안 <code class="inl">localhost</code>는 호스트가 아니다 → <code class="inl">OLLAMA_HOST=http://host.docker.internal:11434</code>(Mac/Win) 또는 호스트 IP.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. 트러블슈팅 -->
+  <section class="slide t-autumn-b" aria-label="트러블슈팅">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">트러블슈팅 / 자주 막히는 곳</div>
+        <h2 class="head">막히면 <span class="accent">여기부터</span></h2>
+        <div class="card" style="max-width:min(97vw,1180px);align-self:center;width:100%">
+          <table class="tbl">
+            <thead><tr><th style="width:26%">증상</th><th style="width:32%">원인</th><th>해결</th></tr></thead>
+            <tbody>
+              <tr><td class="em"><code>401</code> AuthenticationError</td><td>키 없음/오타/만료</td><td><code>.env</code>의 <code>OPENAI_API_KEY</code>, <code>echo $OPENAI_API_KEY</code> 확인. 새 키 발급 후 교체</td></tr>
+              <tr><td class="em"><code>429</code> insufficient_quota</td><td>크레딧 소진/결제 미등록</td><td>대시보드 잔액·결제수단 확인. 급하면 <code>LLM_PROVIDER=ollama</code></td></tr>
+              <tr><td class="em"><code>429</code> rate limit</td><td>짧은 시간 과다 호출</td><td>잠시 대기 후 재시도. 지수 백오프(재시도 간격↑) 추가</td></tr>
+              <tr><td class="em"><code>model_not_found</code></td><td>모델명 오타/미지원</td><td><code>gpt-4o-mini</code> 등 유효한 이름·계정 접근 가능 모델로</td></tr>
+              <tr><td class="em">스트리밍이 한 번에 몰림</td><td>프록시/서버 버퍼링</td><td><code>X-Accel-Buffering: no</code> 유지, <code>curl -N</code>. Nginx/Ingress 버퍼링 off</td></tr>
+              <tr><td class="em">SSE 줄바꿈 답 깨짐</td><td><code>data:</code> 프레임에 <code>\n</code> 포함</td><td>조각을 <code>json.dumps</code>로 감싸 전송, 또는 <code>sse-starlette</code></td></tr>
+              <tr><td class="em">Ollama connection refused</td><td>데몬 미실행/주소 오류</td><td><code>ollama serve</code>, <code>OLLAMA_HOST</code> 확인. 컨테이너면 <code>host.docker.internal</code></td></tr>
+              <tr><td class="em">키가 git에 커밋될 뻔</td><td><code>.gitignore</code> 누락</td><td><code>.env</code>가 <code>.gitignore</code>에 있는지 확인. 이미 커밋 시 <b>키 즉시 폐기·재발급</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. 과제 + 체크리스트 -->
+  <section class="slide t-autumn-b" aria-label="이번 주 과제와 체크리스트">
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="section-no">과제 / Block 2 미니 과제 시작</div>
+        <h2 class="head">docpilot에 <span class="accent">/chat</span> 붙이기</h2>
+        <div class="split" style="align-items:stretch">
+          <div class="card">
+            <b style="color:var(--accent)">제출물 (리포지토리 커밋 + 실행 로그/스크린샷)</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.24rem,0.8vh,0.5rem)">
+              <li><span class="mk">1</span><span><b>필수</b> — <code class="inl">/chat</code>·<code class="inl">/chat/stream</code> 추가, OpenAI(또는 Gemini)로 실제 응답 스크린샷/로그</span></li>
+              <li><span class="mk">2</span><span><b>필수</b> — <code class="inl">.env</code>가 <code class="inl">.gitignore</code>에 포함, <b>키가 커밋되지 않음</b>(<code class="inl">git log</code>/<code class="inl">git show</code>에 키 없음)</span></li>
+              <li><span class="mk">3</span><span><b>도전</b> — SSE 프레임을 <code class="inl">data: {json.dumps({"delta": piece})}</code> 형태로 줄바꿈 안전하게 + <code class="inl">chat.html</code> JSON 파싱</span></li>
+              <li><span class="mk">4</span><span><b>도전</b> — <code class="inl">system</code> 프롬프트로 성격 2종(친절한 튜터 vs 깐깐한 시니어) + <code class="inl">temperature</code> 0.0/1.0 비교 서술</span></li>
+              <li><span class="mk">5</span><span><b>분석</b> — 같은 질문을 OpenAI/Gemini/Ollama로 호출해 품질·속도·비용을 표로 비교</span></li>
+            </ul>
+          </div>
+          <div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--yellow-soft) 55%,var(--paper)),var(--paper))">
+            <b style="color:var(--ink)">완료 체크리스트</b>
+            <ul class="checklist" style="margin-top:0.6em;gap:clamp(0.22rem,0.75vh,0.48rem)">
+              <li><span class="mk">✓</span><span><code class="inl">openai</code>·<code class="inl">google-genai</code>·<code class="inl">pydantic-settings</code>·<code class="inl">sse-starlette</code> 설치·requirements 반영</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">.env</code>로 키 로드, <code class="inl">.gitignore</code>에 <code class="inl">.env</code>(하드코딩 0건)</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">app/config.py</code>(Settings) 작성·import 확인</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">app/llm.py</code> 추상화(<code class="inl">build_messages</code>/<code class="inl">complete</code>/<code class="inl">stream</code>)</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">/chat</code>(비스트리밍) 동작(<code class="inl">/docs</code>에서도)</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">/chat/stream</code>(SSE) 스트리밍 확인(<code class="inl">curl -N</code>)</span></li>
+              <li><span class="mk">✓</span><span><code class="inl">LLM_PROVIDER</code>만 바꿔 Gemini/Ollama 교체 성공</span></li>
+              <li><span class="mk">✓</span><span>system 프롬프트/temperature로 응답 변화 관찰</span></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. 다음 주 예고 -->
+  <section class="slide t-autumn-b" aria-label="다음 주 예고">
+    <svg class="motif motif--leaf float-motif" style="--mo:0.42" viewBox="0 0 200 200" aria-hidden="true"><path fill="currentColor" d="M170 30C90 30 40 80 40 160C40 165 45 170 50 170C130 170 180 120 180 40C180 35 175 30 170 30Z"/><path stroke="#FFF8F0" stroke-width="5" fill="none" d="M60 155C90 120 130 80 165 45"/></svg>
+    <div class="slide-content">
+      <div class="stagger" style="display:flex;flex-direction:column;gap:var(--content-gap)">
+        <div class="eyebrow">Next · Week 07 · Block 2</div>
+        <h2 class="head" style="font-size:var(--title-size)">다음 주 —<br/><span class="accent">멀티모달과 Hugging Face</span></h2>
+        <p class="hero-line" style="max-width:64ch">텍스트를 넘어 <b style="color:var(--ink)">이미지·음성</b>을 다루고, Hugging Face 생태계(Hub, <code class="inl">transformers</code>, Inference API)를 도입한다. 특히 <b style="color:var(--ink)">텍스트 임베딩 모델</b>을 붙인다.</p>
+        <div class="hero-evo" style="gap:0.6em">
+          <span class="chip">이미지·음성 멀티모달</span>
+          <span class="chip">Hugging Face Hub · transformers · Inference API</span>
+          <span class="chip">텍스트 임베딩 모델</span>
+        </div>
+        <p class="note">이번 주의 <code class="inl">/chat</code>(생성)과 다음 주의 <b>임베딩</b>이 만나 <b>week08 RAG</b>에서 <code class="inl">/ask</code>(검색증강 답변)로 완성된다.</p>
+        <div class="hero-evo" style="margin-top:0.4em">
+          <span class="chip" style="border-color:var(--terracotta-deep)">W06 LLM API 연동</span>
+          <span class="arrow">→</span>
+          <span class="chip" style="background:color-mix(in srgb,var(--plum) 25%,var(--paper))">W07 멀티모달 · HF</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var deck = document.getElementById("deck");
+  var slides = Array.prototype.slice.call(deck.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var curNo = document.getElementById("curNo");
+  var totNo = document.getElementById("totNo");
+  var dotsWrap = document.getElementById("dots");
+  var index = 0;
+  var locked = false;
+
+  totNo.textContent = String(total).padStart(2, "0");
+
+  // 내비 도트 생성
+  slides.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", "슬라이드 " + (i + 1));
+    b.addEventListener("click", function () { go(i); });
+    dotsWrap.appendChild(b);
+  });
+  var dots = Array.prototype.slice.call(dotsWrap.children);
+
+  function render() {
+    deck.style.setProperty("--i", index);
+    var pct = total > 1 ? (index / (total - 1)) * 100 : 100;
+    progress.style.width = pct + "%";
+    curNo.textContent = String(index + 1).padStart(2, "0");
+    slides.forEach(function (s, i) { s.classList.toggle("active", i === index); });
+    dots.forEach(function (d, i) { d.classList.toggle("on", i === index); });
+  }
+
+  function go(i) {
+    var next = Math.max(0, Math.min(total - 1, i));
+    if (next === index) return;
+    index = next;
+    render();
+  }
+  function next() { go(index + 1); }
+  function prev() { go(index - 1); }
+
+  // 키보드
+  window.addEventListener("keydown", function (e) {
+    switch (e.key) {
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": case "Spacebar":
+        e.preventDefault(); next(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp":
+        e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End": e.preventDefault(); go(total - 1); break;
+    }
+  });
+
+  // 휠 (디바운스)
+  window.addEventListener("wheel", function (e) {
+    if (locked) return;
+    if (Math.abs(e.deltaY) < 22) return;
+    locked = true;
+    if (e.deltaY > 0) next(); else prev();
+    setTimeout(function () { locked = false; }, 780);
+  }, { passive: true });
+
+  // 터치 스와이프
+  var startY = 0, startX = 0;
+  window.addEventListener("touchstart", function (e) {
+    startY = e.touches[0].clientY; startX = e.touches[0].clientX;
+  }, { passive: true });
+  window.addEventListener("touchend", function (e) {
+    var dy = e.changedTouches[0].clientY - startY;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dy) > 45 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) next(); else prev();
+    } else if (Math.abs(dx) > 55) {
+      if (dx < 0) next(); else prev();
+    }
+  }, { passive: true });
+
+  // 해시 딥링크 (#3 등)
+  function fromHash() {
+    var h = parseInt((location.hash || "").replace("#", ""), 10);
+    if (!isNaN(h) && h >= 1 && h <= total) index = h - 1;
+  }
+  fromHash();
+  window.addEventListener("hashchange", function () { fromHash(); render(); });
+
+  render();
+})();
+</script>
