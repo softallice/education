@@ -1,0 +1,10 @@
+# requirements.txt — docpilot-start (교안 블록1 최소 스택)
+fastapi==0.115.*
+uvicorn[standard]==0.32.*
+pydantic==2.*
+pydantic-settings==2.*
+python-dotenv==1.0.*
+python-multipart==0.0.*
+# DB
+SQLAlchemy==2.*
+psycopg[binary]==3.*
